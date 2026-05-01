@@ -235,3 +235,24 @@ test('chooseRunConfig asks for destination on enter when none is configured', as
     destination: root,
   });
 });
+
+test('chooseRunConfig prompts for missing first-run settings', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-first-use-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: null,
+    apiKey: null,
+    destination: null,
+    inputStream: input,
+    outputStream: output,
+  });
+  feedLines(input, ['http://immich.test:2283', 'new-api-key', root]);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://immich.test:2283',
+    apiKey: 'new-api-key',
+    destination: root,
+  });
+});

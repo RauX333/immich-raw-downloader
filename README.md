@@ -13,7 +13,26 @@ The app is a dependency-free Node.js command-line tool for macOS, Linux, and Win
 
 ## Quick Start
 
-Create your local config:
+Run the tool:
+
+```sh
+npm start
+```
+
+If settings are missing, enter them in the terminal:
+
+```text
+Current settings
+  Immich URL: not set
+  Immich API key: not set
+  Download destination: not set
+
+Immich URL: http://immich.example.local:2283
+Immich API key: your-api-key
+Download destination: /path/to/download-folder
+```
+
+To avoid entering settings each time, create a local `.env` file:
 
 ```sh
 cp .env.example .env
@@ -27,13 +46,7 @@ IMMICH_API_KEY=your-api-key
 DOWNLOAD_DESTINATION=/path/to/download-folder
 ```
 
-Run the tool:
-
-```sh
-npm start
-```
-
-At startup, the tool shows the current settings:
+When settings are already present, the tool shows them before planning:
 
 ```text
 Current settings
@@ -116,7 +129,7 @@ This creates:
 - `dist/immich-raw-downloader-linux/run-immich-raw-downloader.sh`
 - `dist/immich-raw-downloader-windows/Run Immich RAW Downloader.cmd`
 
-Each folder contains the app, a launcher, `README-FIRST.txt`, and a copy of `.env` if one exists. Copy the correct folder to the target computer, make sure Node.js 22 or newer is installed there, then double-click the launcher.
+Each folder contains the app, a launcher, `README-FIRST.txt`, and a copy of `.env` if one exists. Copy the correct folder to the target computer, make sure Node.js 22 or newer is installed there, then double-click the launcher. If there is no `.env`, the launcher asks for the missing settings in the terminal.
 
 If double-click is blocked by the OS or file manager, open a terminal in that bundle folder and run the launcher manually.
 

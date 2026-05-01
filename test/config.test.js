@@ -25,6 +25,14 @@ test('download destination is optional when env is missing', () => {
   });
 });
 
+test('connection settings can be missing before first-run prompts', () => {
+  assert.deepEqual(readConfigFromEnv({}), {
+    immichUrl: null,
+    apiKey: null,
+    downloadDestination: null,
+  });
+});
+
 test('command-line destination still parses as an override', () => {
   assert.equal(parseArgs(['--dest', '/override']).destination, '/override');
   assert.equal(parseArgs(['--destination=/override']).destination, '/override');

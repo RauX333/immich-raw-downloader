@@ -95,11 +95,12 @@ This folder is a portable bundle for ${platform.name}.
 
 How to run:
 1. Install Node.js 22 or newer if this computer does not have it.
-2. Open .env and set IMMICH_URL, IMMICH_API_KEY, and optionally DOWNLOAD_DESTINATION.
-3. Double-click:
+2. Double-click:
    ${launcher}
 
-The launcher opens or uses a terminal window, shows the download plan, asks for confirmation, and then downloads files.
+The launcher opens or uses a terminal window. If .env is missing or incomplete, enter IMMICH_URL, IMMICH_API_KEY, and the download destination when prompted.
+
+After settings are entered, the launcher shows the download plan, asks for confirmation, and then downloads files.
 
 If double-click is blocked by your file manager, open a terminal in this folder and run the launcher from there.
 `;

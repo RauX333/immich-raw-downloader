@@ -17,8 +17,6 @@ export async function chooseRunConfig({
     destination: destination ? path.resolve(destination) : null,
   };
 
-  validateImmichUrl(current.immichUrl);
-  validateApiKey(current.apiKey);
   if (current.destination) {
     await ensureExistingDirectory(current.destination);
   }
@@ -27,6 +25,11 @@ export async function chooseRunConfig({
   const rl = readline.createInterface({ input: inputStream, output: outputStream });
 
   try {
+    const completedInitialSetup = await promptForMissingRunConfig(rl, outputStream, current);
+    if (completedInitialSetup) {
+      return current;
+    }
+
     const action = await rl.question('Press Enter to continue planning, or type anything to edit settings: ');
     if (!action.trim()) {
       if (!current.destination) {
@@ -46,6 +49,33 @@ export async function chooseRunConfig({
   } finally {
     rl.close();
   }
+}
+
+async function promptForMissingRunConfig(rl, outputStream, current) {
+  let prompted = false;
+
+  if (!isValidImmichUrl(current.immichUrl)) {
+    if (current.immichUrl) {
+      outputStream.write('Immich URL must be a valid http:// or https:// URL.\n');
+    }
+    current.immichUrl = await promptForImmichUrl(rl, outputStream, current.immichUrl);
+    prompted = true;
+  }
+
+  if (!isValidApiKey(current.apiKey)) {
+    if (current.apiKey) {
+      outputStream.write('Immich API key cannot be empty.\n');
+    }
+    current.apiKey = await promptForApiKey(rl, outputStream, current.apiKey);
+    prompted = true;
+  }
+
+  if (!current.destination) {
+    current.destination = await promptForDestinationValue(rl, outputStream, current.destination);
+    prompted = true;
+  }
+
+  return prompted;
 }
 
 export async function chooseImmichConnection({
@@ -103,7 +133,8 @@ export async function chooseImmichConnection({
 
 async function promptForImmichUrl(rl, outputStream, currentUrl) {
   while (true) {
-    const answer = await rl.question(`Immich URL [${currentUrl}]: `);
+    const question = currentUrl ? `Immich URL [${currentUrl}]: ` : 'Immich URL: ';
+    const answer = await rl.question(question);
     const selectedUrl = answer.trim() || currentUrl;
 
     try {
@@ -117,7 +148,10 @@ async function promptForImmichUrl(rl, outputStream, currentUrl) {
 
 async function promptForApiKey(rl, outputStream, currentApiKey) {
   while (true) {
-    const answer = await rl.question(`Immich API key [${maskApiKey(currentApiKey)}]: `);
+    const question = currentApiKey
+      ? `Immich API key [${maskApiKey(currentApiKey)}]: `
+      : 'Immich API key: ';
+    const answer = await rl.question(question);
     const selectedApiKey = answer.trim() || currentApiKey;
 
     try {
@@ -227,7 +261,7 @@ export function formatRunConfig({ immichUrl, apiKey, destination }) {
   return [
     '',
     'Current settings',
-    `  Immich URL: ${immichUrl}`,
+    `  Immich URL: ${immichUrl || 'not set'}`,
     `  Immich API key: ${maskApiKey(apiKey)}`,
     `  Download destination: ${destination || 'not set'}`,
     '',
@@ -252,5 +286,23 @@ function validateImmichUrl(value) {
 function validateApiKey(value) {
   if (!value || !value.trim()) {
     throw new Error('Immich API key cannot be empty.');
+  }
+}
+
+function isValidImmichUrl(value) {
+  try {
+    validateImmichUrl(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isValidApiKey(value) {
+  try {
+    validateApiKey(value);
+    return true;
+  } catch {
+    return false;
   }
 }

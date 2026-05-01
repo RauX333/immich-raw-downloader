@@ -75,17 +75,9 @@ export function parseArgs(argv) {
 }
 
 export function readConfigFromEnv(env = process.env) {
-  const immichUrl = env.IMMICH_URL;
-  const apiKey = env.IMMICH_API_KEY;
+  const immichUrl = env.IMMICH_URL || null;
+  const apiKey = env.IMMICH_API_KEY || null;
   const downloadDestination = env.DOWNLOAD_DESTINATION || null;
-
-  if (!immichUrl) {
-    throw new Error('IMMICH_URL is required. Add it to .env or the environment.');
-  }
-
-  if (!apiKey) {
-    throw new Error('IMMICH_API_KEY is required. Add it to .env or the environment.');
-  }
 
   return { immichUrl, apiKey, downloadDestination };
 }
