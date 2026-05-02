@@ -43,6 +43,25 @@ test('chooseDownloadAsset falls back when no RAW candidate exists', async () => 
   });
 });
 
+test('chooseDownloadAsset can skip RAW matching and select the original image', async () => {
+  const favorite = {
+    id: 'favorite',
+    type: 'IMAGE',
+    originalFileName: 'DSC001.JPG',
+    fileCreatedAt: '2026-05-01T10:00:00.000Z',
+  };
+  const client = {
+    async searchRawCandidates() {
+      throw new Error('original mode should not search for RAW candidates');
+    },
+  };
+
+  assert.deepEqual(await chooseDownloadAsset(client, favorite, { downloadMode: 'original' }), {
+    asset: favorite,
+    reason: 'original-selected',
+  });
+});
+
 test('downloadFavorites supports dry-run summary without writing files', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-dry-'));
   const client = {
@@ -75,6 +94,7 @@ test('downloadFavorites supports dry-run summary without writing files', async (
 
   assert.equal(summary.favoritesScanned, 1);
   assert.equal(summary.rawMatches, 1);
+  assert.equal(summary.originalDownloads, 0);
   assert.equal(summary.dryRunPlanned, 1);
   assert.equal(summary.downloaded, 0);
   assert.deepEqual(await fs.readdir(root), []);
@@ -143,11 +163,84 @@ test('planDownloads counts files, skipped targets, and known bytes before downlo
   assert.equal(plan.plannedDownloads.length, 2);
   assert.equal(plan.skippedExisting, 1);
   assert.equal(plan.rawMatches, 1);
+  assert.equal(plan.originalDownloads, 0);
   assert.equal(plan.fallbackOriginals, 1);
   assert.equal(plan.totalKnownBytes, 300);
   assert.equal(plan.unknownSizeFiles, 0);
   assert.match(formatDownloadPlan(plan), /Files to download: 2/);
   assert.match(formatDownloadPlan(plan), /Estimated size: 300 B/);
+});
+
+test('planDownloads downloads original images when original mode is selected', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-original-plan-'));
+  const client = {
+    async listFavoriteImages() {
+      return [
+        {
+          id: 'favorite',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.JPG',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+          exifInfo: { fileSizeInByte: 100 },
+        },
+      ];
+    },
+    async searchRawCandidates() {
+      throw new Error('original mode should not search for RAW candidates');
+    },
+  };
+
+  const plan = await planDownloads({
+    client,
+    destination: root,
+    downloadMode: 'original',
+  });
+
+  assert.equal(plan.downloadMode, 'original');
+  assert.equal(plan.rawMatches, 0);
+  assert.equal(plan.originalDownloads, 1);
+  assert.equal(plan.fallbackOriginals, 0);
+  assert.equal(plan.plannedDownloads[0].asset.id, 'favorite');
+  assert.match(formatDownloadPlan(plan), /Mode: original images/);
+  assert.match(formatSummary(planToSummary(plan)), /Original images: 1/);
+});
+
+test('planDownloads can scan album images instead of favorites', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-album-plan-'));
+  const client = {
+    async listFavoriteImages() {
+      throw new Error('favorite images should not be scanned in album mode');
+    },
+    async listAlbumImages(albumId) {
+      assert.equal(albumId, 'album-id');
+      return [
+        {
+          id: 'album-image',
+          type: 'IMAGE',
+          originalFileName: 'ALBUM001.JPG',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+          exifInfo: { fileSizeInByte: 100 },
+        },
+      ];
+    },
+    async searchRawCandidates() {
+      return [];
+    },
+  };
+
+  const plan = await planDownloads({
+    client,
+    destination: root,
+    downloadSource: 'album',
+    albumId: 'album-id',
+  });
+
+  assert.equal(plan.downloadSource, 'album');
+  assert.equal(plan.imagesScanned, 1);
+  assert.equal(plan.fallbackOriginals, 1);
+  assert.match(formatDownloadPlan(plan), /Source: Immich album/);
+  assert.match(formatDownloadPlan(plan), /Album images scanned: 1/);
+  assert.match(formatSummary(planToSummary(plan)), /Album images scanned: 1/);
 });
 
 test('formatPlanSize includes unknown-size files', () => {

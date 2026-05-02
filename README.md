@@ -1,6 +1,6 @@
 # Immich Favorite RAW Downloader
 
-Download the RAW versions of your favorite Immich images. When a favorite image has no matching RAW asset, the tool downloads the favorite image itself.
+Download the RAW versions of your favorite Immich images or images from a chosen Immich album. You can also switch the download mode to save the selected images directly without looking for RAW matches.
 
 The app is a dependency-free Node.js command-line tool for macOS, Linux, and Windows. It can be run from a terminal or from the generated clickable launchers.
 
@@ -8,7 +8,7 @@ The app is a dependency-free Node.js command-line tool for macOS, Linux, and Win
 
 - Node.js 22 or newer
 - Your Immich server URL, for example `http://immich.example.local:2283`
-- An Immich API key with `asset.read` and `asset.download` permissions
+- An Immich API key with `asset.read`, `asset.download`, and `album.read` permissions
 - An existing folder where downloads should be saved
 
 ## Quick Start
@@ -26,6 +26,8 @@ Current settings
   Immich URL: not set
   Immich API key: not set
   Download destination: not set
+  Download source: favorites
+  Download mode: raw
 
 Immich URL: http://immich.example.local:2283
 Immich API key: your-api-key
@@ -44,6 +46,9 @@ Edit `.env`:
 IMMICH_URL=http://immich.example.local:2283
 IMMICH_API_KEY=your-api-key
 DOWNLOAD_DESTINATION=/path/to/download-folder
+IMMICH_DOWNLOAD_SOURCE=favorites
+IMMICH_ALBUM_ID=
+IMMICH_DOWNLOAD_MODE=raw
 ```
 
 When settings are already present, the tool shows them before planning:
@@ -53,11 +58,13 @@ Current settings
   Immich URL: http://immich.example.local:2283
   Immich API key: abcd...wxyz
   Download destination: /path/to/download-folder
+  Download source: favorites
+  Download mode: raw
 
 Press Enter to continue planning, or type anything to edit settings:
 ```
 
-Press Return once to keep the settings and start planning. Type anything else, then press Return, to edit the Immich URL, API key, and download destination before planning. The API key is masked on screen.
+Press Return once to keep the settings and start planning. Type anything else, then press Return, to open the settings menu before planning. From there, choose a setting by number, or press Return when done. Type `back` inside any setting prompt to return to the settings menu without changing that value. The API key is masked on screen. If you choose `album`, the tool loads your Immich albums and lets you pick one by number. If you choose `original` mode, the tool downloads selected images directly and skips RAW matching. Your selected settings are saved to `.env` and become the default for the next run.
 
 ## Download Flow
 
@@ -68,9 +75,13 @@ download destination: /path/to/download-folder
 Planning download...
 
 Download plan
+  Source: favorite images
+  Mode: RAW versions
+  Favorites scanned: 135
   Files to download: 123
   Estimated size: 6.00 GB
   RAW matches: 118
+  Original images: 0
   Fallback originals: 5
   Skipped existing: 12
   Preflight failures: 0
@@ -135,12 +146,14 @@ If double-click is blocked by the OS or file manager, open a terminal in that bu
 
 ## How RAW Matching Works
 
-- The tool loads Immich image assets marked as favorite.
-- For each favorite, it searches nearby image assets taken within 2 minutes.
+- The tool loads Immich image assets marked as favorite by default.
+- If `IMMICH_DOWNLOAD_SOURCE=album`, the tool loads images from the selected `IMMICH_ALBUM_ID` instead.
+- If `IMMICH_DOWNLOAD_MODE=raw`, for each selected image, it searches nearby image assets taken within 2 minutes.
+- If `IMMICH_DOWNLOAD_MODE=original`, it downloads the selected image itself and does not search for RAW candidates.
 - A RAW candidate must have the same filename stem, such as `DSC01234.JPG` and `DSC01234.ARW`.
 - Common RAW formats are recognized, including `.arw`, `.cr2`, `.cr3`, `.nef`, `.raf`, `.rw2`, `.orf`, `.dng`, and others.
 - If multiple RAW candidates match, the closest capture time wins.
-- If no RAW match exists, the favorite image itself is downloaded.
+- If no RAW match exists, the selected image itself is downloaded.
 
 ## Notes
 

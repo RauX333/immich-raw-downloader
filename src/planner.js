@@ -2,6 +2,14 @@ import { pipeline } from 'node:stream/promises';
 import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import {
+  DEFAULT_DOWNLOAD_MODE,
+  DEFAULT_DOWNLOAD_SOURCE,
+  DOWNLOAD_MODE_ORIGINAL,
+  DOWNLOAD_SOURCE_ALBUM,
+  normalizeDownloadMode,
+  normalizeDownloadSource,
+} from './config.js';
+import {
   getAssetSizeBytes,
   getAssetFilename,
   getCaptureDate,
@@ -25,18 +33,25 @@ export function getSearchWindow(asset, toleranceMs = TWO_MINUTES_MS) {
   };
 }
 
-export async function chooseDownloadAsset(client, favorite, options = {}) {
-  if (shouldDownloadFavoriteDirectly(favorite)) {
+export async function chooseDownloadAsset(client, sourceAsset, options = {}) {
+  if (normalizeDownloadMode(options.downloadMode) === DOWNLOAD_MODE_ORIGINAL) {
     return {
-      asset: favorite,
-      reason: 'favorite-is-raw',
+      asset: sourceAsset,
+      reason: 'original-selected',
     };
   }
 
-  const window = getSearchWindow(favorite, options.toleranceMs);
+  if (shouldDownloadFavoriteDirectly(sourceAsset)) {
+    return {
+      asset: sourceAsset,
+      reason: 'source-is-raw',
+    };
+  }
+
+  const window = getSearchWindow(sourceAsset, options.toleranceMs);
   if (!window) {
     return {
-      asset: favorite,
+      asset: sourceAsset,
       reason: 'missing-capture-date',
     };
   }
@@ -44,11 +59,11 @@ export async function chooseDownloadAsset(client, favorite, options = {}) {
   const candidates = await client.searchRawCandidates({
     ...window,
   });
-  const match = pickBestRawMatch(favorite, candidates, options);
+  const match = pickBestRawMatch(sourceAsset, candidates, options);
 
   return match
     ? { asset: match, reason: 'raw-match' }
-    : { asset: favorite, reason: 'no-raw-match' };
+    : { asset: sourceAsset, reason: 'no-raw-match' };
 }
 
 export async function downloadFavorites({
@@ -56,9 +71,19 @@ export async function downloadFavorites({
   destination,
   dryRun = false,
   verbose = false,
+  downloadSource = DEFAULT_DOWNLOAD_SOURCE,
+  albumId = null,
+  downloadMode = DEFAULT_DOWNLOAD_MODE,
   progressReporter = null,
 }) {
-  const plan = await planDownloads({ client, destination, verbose });
+  const plan = await planDownloads({
+    client,
+    destination,
+    verbose,
+    downloadSource,
+    albumId,
+    downloadMode,
+  });
   if (dryRun) {
     return planToSummary(plan);
   }
@@ -70,11 +95,23 @@ export async function planDownloads({
   client,
   destination,
   verbose = false,
+  downloadSource = DEFAULT_DOWNLOAD_SOURCE,
+  albumId = null,
+  downloadMode = DEFAULT_DOWNLOAD_MODE,
 }) {
-  const favorites = await client.listFavoriteImages();
+  const source = normalizeDownloadSource(downloadSource);
+  const mode = normalizeDownloadMode(downloadMode);
+  const sourceImages = await listSourceImages(client, { downloadSource: source, albumId });
   const plan = {
-    favoritesScanned: favorites.length,
+    downloadSource: source,
+    downloadMode: mode,
+    albumId: source === DOWNLOAD_SOURCE_ALBUM ? albumId : null,
+    sourceLabel: formatSourceLabel(source),
+    modeLabel: formatModeLabel(mode),
+    imagesScanned: sourceImages.length,
+    favoritesScanned: sourceImages.length,
     rawMatches: 0,
+    originalDownloads: 0,
     fallbackOriginals: 0,
     skippedExisting: 0,
     plannedDownloads: [],
@@ -83,17 +120,19 @@ export async function planDownloads({
     failures: [],
   };
 
-  for (const favorite of favorites) {
+  for (const sourceAsset of sourceImages) {
     try {
-      const choice = await chooseDownloadAsset(client, favorite);
+      const choice = await chooseDownloadAsset(client, sourceAsset, { downloadMode: mode });
       const downloadAsset = choice.asset;
-      const isRawMatch = choice.reason === 'raw-match' || choice.reason === 'favorite-is-raw';
+      const isRawMatch = choice.reason === 'raw-match'
+        || choice.reason === 'source-is-raw'
+        || choice.reason === 'favorite-is-raw';
       const target = await prepareDownloadPath(destination, downloadAsset);
       const exists = await pathExists(target.filePath);
 
       if (verbose) {
         console.log(
-          `${getAssetFilename(favorite)} -> ${getAssetFilename(downloadAsset)} (${choice.reason})`,
+          `${getAssetFilename(sourceAsset)} -> ${getAssetFilename(downloadAsset)} (${choice.reason})`,
         );
       }
 
@@ -110,7 +149,8 @@ export async function planDownloads({
       }
 
       plan.plannedDownloads.push({
-        favorite,
+        favorite: sourceAsset,
+        sourceAsset,
         asset: downloadAsset,
         target,
         reason: choice.reason,
@@ -118,15 +158,17 @@ export async function planDownloads({
         sizeBytes,
       });
 
-      if (isRawMatch) {
+      if (choice.reason === 'original-selected') {
+        plan.originalDownloads += 1;
+      } else if (isRawMatch) {
         plan.rawMatches += 1;
       } else {
         plan.fallbackOriginals += 1;
       }
     } catch (error) {
       plan.failures.push({
-        assetId: favorite.id,
-        filename: getAssetFilename(favorite),
+        assetId: sourceAsset.id,
+        filename: getAssetFilename(sourceAsset),
         message: error.message,
       });
     }
@@ -178,8 +220,14 @@ export async function executeDownloadPlan({ client, plan, progressReporter = nul
 
 export function planToSummary(plan) {
   return {
+    downloadSource: plan.downloadSource || DEFAULT_DOWNLOAD_SOURCE,
+    downloadMode: plan.downloadMode || DEFAULT_DOWNLOAD_MODE,
+    sourceLabel: plan.sourceLabel || formatSourceLabel(plan.downloadSource),
+    modeLabel: plan.modeLabel || formatModeLabel(plan.downloadMode),
+    imagesScanned: plan.imagesScanned ?? plan.favoritesScanned,
     favoritesScanned: plan.favoritesScanned,
     rawMatches: plan.rawMatches,
+    originalDownloads: plan.originalDownloads || 0,
     fallbackOriginals: plan.fallbackOriginals,
     skippedExisting: plan.skippedExisting,
     dryRunPlanned: plan.plannedDownloads.length,
@@ -192,9 +240,13 @@ export function formatDownloadPlan(plan) {
   return [
     '',
     'Download plan',
+    `  Source: ${plan.sourceLabel || formatSourceLabel(plan.downloadSource)}`,
+    `  Mode: ${plan.modeLabel || formatModeLabel(plan.downloadMode)}`,
+    `  ${formatScannedLabel(plan)}: ${plan.imagesScanned ?? plan.favoritesScanned}`,
     `  Files to download: ${plan.plannedDownloads.length}`,
     `  Estimated size: ${formatPlanSize(plan)}`,
     `  RAW matches: ${plan.rawMatches}`,
+    `  Original images: ${plan.originalDownloads || 0}`,
     `  Fallback originals: ${plan.fallbackOriginals}`,
     `  Skipped existing: ${plan.skippedExisting}`,
     `  Preflight failures: ${plan.failures.length}`,
@@ -214,8 +266,9 @@ export function formatSummary(summary, { dryRun = false } = {}) {
   const lines = [
     '',
     'Summary',
-    `  Favorites scanned: ${summary.favoritesScanned}`,
+    `  ${formatScannedLabel(summary)}: ${summary.imagesScanned ?? summary.favoritesScanned}`,
     `  RAW matches: ${summary.rawMatches}`,
+    `  Original images: ${summary.originalDownloads || 0}`,
     `  Fallback originals: ${summary.fallbackOriginals}`,
     `  Skipped existing: ${summary.skippedExisting}`,
   ];
@@ -233,4 +286,30 @@ export function formatSummary(summary, { dryRun = false } = {}) {
   }
 
   return lines.join('\n');
+}
+
+async function listSourceImages(client, { downloadSource, albumId }) {
+  if (downloadSource === DOWNLOAD_SOURCE_ALBUM) {
+    return client.listAlbumImages(albumId);
+  }
+
+  return client.listFavoriteImages();
+}
+
+function formatSourceLabel(downloadSource = DEFAULT_DOWNLOAD_SOURCE) {
+  return normalizeDownloadSource(downloadSource) === DOWNLOAD_SOURCE_ALBUM
+    ? 'Immich album'
+    : 'favorite images';
+}
+
+function formatModeLabel(downloadMode = DEFAULT_DOWNLOAD_MODE) {
+  return normalizeDownloadMode(downloadMode) === DOWNLOAD_MODE_ORIGINAL
+    ? 'original images'
+    : 'RAW versions';
+}
+
+function formatScannedLabel(value) {
+  return normalizeDownloadSource(value?.downloadSource) === DOWNLOAD_SOURCE_ALBUM
+    ? 'Album images scanned'
+    : 'Favorites scanned';
 }

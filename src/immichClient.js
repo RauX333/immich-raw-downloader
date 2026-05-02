@@ -53,6 +53,27 @@ export class ImmichClient {
     return favorites;
   }
 
+  async listAlbums() {
+    const albums = await this.#requestJson('/albums', { method: 'GET' });
+    return Array.isArray(albums) ? albums : [];
+  }
+
+  async listAlbumImages(albumId) {
+    if (!albumId) {
+      throw new Error('Album download source requires IMMICH_ALBUM_ID.');
+    }
+
+    const images = [];
+    for await (const asset of this.iterateSearch({
+      albumIds: [albumId],
+      type: 'IMAGE',
+    })) {
+      images.push(asset);
+    }
+
+    return images;
+  }
+
   async searchRawCandidates({ takenAfter, takenBefore }) {
     const body = {
       type: 'IMAGE',
