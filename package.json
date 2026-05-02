@@ -1,7 +1,7 @@
 {
   "name": "immich-raw-downloader",
   "version": "1.0.0",
-  "description": "Download RAW versions of favorite Immich images, with original fallback.",
+  "description": "Download RAW versions of favorite or album Immich images, with original fallback.",
   "type": "module",
   "bin": {
     "immich-raw-downloader": "./bin/immich-raw-downloader.js"

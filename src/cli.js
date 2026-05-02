@@ -1,4 +1,10 @@
-import { helpText, loadDotenv, parseArgs, readConfigFromEnv } from './config.js';
+import {
+  helpText,
+  loadDotenv,
+  parseArgs,
+  readConfigFromEnv,
+  saveConfigToEnv,
+} from './config.js';
 import { ImmichClient } from './immichClient.js';
 import {
   executeDownloadPlan,
@@ -24,7 +30,22 @@ export async function runCli(argv = process.argv.slice(2)) {
     immichUrl: config.immichUrl,
     apiKey: config.apiKey,
     destination: options.destination || config.downloadDestination,
+    downloadSource: config.downloadSource,
+    albumId: config.albumId,
+    downloadMode: config.downloadMode,
     allowDestinationChange: !options.destination,
+    listAlbums: async ({ immichUrl, apiKey }) => {
+      const settingsClient = new ImmichClient({ baseUrl: immichUrl, apiKey });
+      return settingsClient.listAlbums();
+    },
+  });
+  await saveConfigToEnv({
+    immichUrl: runConfig.immichUrl,
+    apiKey: runConfig.apiKey,
+    downloadDestination: options.destination ? undefined : runConfig.destination,
+    downloadSource: runConfig.downloadSource,
+    albumId: runConfig.albumId,
+    downloadMode: runConfig.downloadMode,
   });
   const client = new ImmichClient({
     baseUrl: runConfig.immichUrl,
@@ -33,11 +54,16 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   console.log(`immich url: ${runConfig.immichUrl}`);
   console.log(`download destination: ${runConfig.destination}`);
+  console.log(`download source: ${runConfig.downloadSource === 'album' ? 'Immich album' : 'favorite images'}`);
+  console.log(`download mode: ${runConfig.downloadMode === 'original' ? 'original images' : 'RAW versions'}`);
   console.log('Planning download...');
   const plan = await planDownloads({
     client,
     destination: runConfig.destination,
     verbose: options.verbose,
+    downloadSource: runConfig.downloadSource,
+    albumId: runConfig.albumId,
+    downloadMode: runConfig.downloadMode,
   });
   console.log(formatDownloadPlan(plan));
 

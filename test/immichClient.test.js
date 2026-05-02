@@ -53,6 +53,53 @@ test('iterates paged metadata search responses', async () => {
   assert.equal(requests[0].body.withExif, true);
 });
 
+test('listAlbums loads Immich albums', async () => {
+  const fetchImpl = async (url, init) => {
+    assert.equal(String(url), 'http://immich.test/api/albums');
+    assert.equal(init.method, 'GET');
+    return Response.json([{ id: 'album-id', albumName: 'Trip', assetCount: 10 }]);
+  };
+
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'key',
+    fetchImpl,
+  });
+
+  assert.deepEqual(await client.listAlbums(), [
+    { id: 'album-id', albumName: 'Trip', assetCount: 10 },
+  ]);
+});
+
+test('listAlbumImages searches image assets by album id', async () => {
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), body: JSON.parse(init.body) });
+    return Response.json({ assets: { items: [{ id: 'album-image' }] } });
+  };
+
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'key',
+    fetchImpl,
+  });
+
+  assert.deepEqual(await client.listAlbumImages('album-id'), [{ id: 'album-image' }]);
+  assert.equal(requests[0].url, 'http://immich.test/api/search/metadata');
+  assert.deepEqual(requests[0].body.albumIds, ['album-id']);
+  assert.equal(requests[0].body.type, 'IMAGE');
+});
+
+test('listAlbumImages requires an album id', async () => {
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'key',
+    fetchImpl: async () => Response.json({}),
+  });
+
+  await assert.rejects(() => client.listAlbumImages(null), /IMMICH_ALBUM_ID/);
+});
+
 test('downloadAsset returns a node readable stream', async () => {
   const fetchImpl = async () => new Response(
     new ReadableStream({

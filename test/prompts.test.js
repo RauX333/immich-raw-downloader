@@ -170,6 +170,8 @@ test('formatRunConfig shows editable settings with masked API key', () => {
   assert.match(text, /Immich URL: http:\/\/immich\.test/);
   assert.match(text, /Immich API key: 1234\.\.\.cdef/);
   assert.match(text, /Download destination: \/downloads/);
+  assert.match(text, /Download source: favorites/);
+  assert.match(text, /Download mode: raw/);
 });
 
 test('chooseRunConfig continues with current settings when user presses enter', async () => {
@@ -190,6 +192,9 @@ test('chooseRunConfig continues with current settings when user presses enter', 
     immichUrl: 'http://immich.test',
     apiKey: 'api-key',
     destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
   });
 });
 
@@ -206,12 +211,118 @@ test('chooseRunConfig edits settings after non-empty menu input', async () => {
     inputStream: input,
     outputStream: output,
   });
-  feedLines(input, ['e', 'https://new.test', 'new-key', newRoot]);
+  feedLines(input, ['e', '1', 'https://new.test', '2', 'new-key', '3', newRoot, '']);
 
   assert.deepEqual(await resultPromise, {
     immichUrl: 'https://new.test',
     apiKey: 'new-key',
     destination: newRoot,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
+  });
+});
+
+test('chooseRunConfig lets user pick an album from Immich albums', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-album-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    inputStream: input,
+    outputStream: output,
+    listAlbums: async () => [
+      { id: 'album-one', albumName: 'Trip', assetCount: 12 },
+      { id: 'album-two', albumName: 'Family', assetCount: 34 },
+    ],
+  });
+  feedLines(input, ['e', '4', 'album', '2', '']);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    downloadSource: 'album',
+    albumId: 'album-two',
+    downloadMode: 'raw',
+  });
+});
+
+test('chooseRunConfig lets user choose original image download mode', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-original-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    inputStream: input,
+    outputStream: output,
+  });
+  feedLines(input, ['e', '5', 'original', '']);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'original',
+  });
+});
+
+test('chooseRunConfig can go back from a setting prompt without changing it', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-back-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    inputStream: input,
+    outputStream: output,
+  });
+  feedLines(input, ['e', '1', 'back', '']);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
+  });
+});
+
+test('chooseRunConfig can go back from album selection and keep previous source', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-album-back-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    inputStream: input,
+    outputStream: output,
+    listAlbums: async () => [
+      { id: 'album-one', albumName: 'Trip', assetCount: 12 },
+    ],
+  });
+  feedLines(input, ['e', '4', 'album', 'back', '']);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
   });
 });
 
@@ -233,6 +344,9 @@ test('chooseRunConfig asks for destination on enter when none is configured', as
     immichUrl: 'http://immich.test',
     apiKey: 'api-key',
     destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
   });
 });
 
@@ -254,5 +368,8 @@ test('chooseRunConfig prompts for missing first-run settings', async () => {
     immichUrl: 'http://immich.test:2283',
     apiKey: 'new-api-key',
     destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
   });
 });
