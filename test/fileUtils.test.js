@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { prepareDownloadPath, resolveInside, sanitizeFilename } from '../src/fileUtils.js';
+import {
+  buildConflictFilename,
+  prepareDownloadPath,
+  resolveInside,
+  sanitizeFilename,
+} from '../src/fileUtils.js';
 import { pathExists } from '../src/fileUtils.js';
 
 test('sanitizes filenames for Windows, Linux, and macOS', () => {
@@ -32,6 +37,11 @@ test('prepareDownloadPath builds safe date-folder target path', async () => {
   assert.equal(target.dateFolder, '2026-05-01');
   assert.equal(target.fileName, '_CON.ARW');
   assert.equal(path.relative(root, target.filePath), path.join('2026-05-01', '_CON.ARW'));
+});
+
+test('buildConflictFilename appends a short sanitized asset id before extension', () => {
+  assert.equal(buildConflictFilename('DSC001.ARW', 'asset:1234567890abcdef'), 'DSC001.asset_123456.ARW');
+  assert.equal(buildConflictFilename('DSC001.ARW', 'asset-id', 2), 'DSC001.asset-id-2.ARW');
 });
 
 test('pathExists reports missing and existing files', async () => {

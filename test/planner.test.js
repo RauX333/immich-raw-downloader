@@ -280,6 +280,39 @@ test('planDownloads avoids duplicate downloads in both mode when source is RAW',
   assert.equal(plan.plannedDownloads[0].asset.id, 'favorite-raw');
 });
 
+test('planDownloads appends asset id when planned downloads share a target filename', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-duplicate-plan-'));
+  const client = {
+    async listFavoriteImages() {
+      return [
+        {
+          id: 'asset-one',
+          type: 'IMAGE',
+          originalFileName: 'DUP.JPG',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+        },
+        {
+          id: 'asset-two',
+          type: 'IMAGE',
+          originalFileName: 'DUP.JPG',
+          fileCreatedAt: '2026-05-01T10:00:30.000Z',
+        },
+      ];
+    },
+    async searchRawCandidates() {
+      return [];
+    },
+  };
+
+  const plan = await planDownloads({ client, destination: root });
+
+  assert.deepEqual(plan.plannedDownloads.map((item) => item.target.fileName), [
+    'DUP.JPG',
+    'DUP.asset-two.JPG',
+  ]);
+  assert.equal(plan.skippedExisting, 0);
+});
+
 test('planDownloads can scan album images instead of favorites', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-album-plan-'));
   const client = {
@@ -362,6 +395,242 @@ test('executeDownloadPlan downloads only preplanned items', async () => {
   const summary = await executeDownloadPlan({ client, plan });
   assert.equal(summary.downloaded, 1);
   assert.equal(await fs.readFile(path.join(root, '2026-05-01', 'DSC001.ARW'), 'utf8'), 'raw-bytes');
+});
+
+test('executeDownloadPlan writes to part file before renaming on success', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-part-success-'));
+  const finalPath = path.join(root, '2026-05-01', 'DSC001.ARW');
+  const plan = {
+    favoritesScanned: 1,
+    rawMatches: 1,
+    fallbackOriginals: 0,
+    skippedExisting: 0,
+    plannedDownloads: [
+      {
+        asset: {
+          id: 'raw',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.ARW',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+        },
+        target: {
+          fileName: 'DSC001.ARW',
+          directoryPath: path.dirname(finalPath),
+          filePath: finalPath,
+        },
+        sizeBytes: 9,
+      },
+    ],
+    totalKnownBytes: 9,
+    unknownSizeFiles: 0,
+    failures: [],
+  };
+  const client = {
+    async downloadAsset() {
+      return Readable.from(['raw-bytes']);
+    },
+  };
+
+  const summary = await executeDownloadPlan({ client, plan });
+
+  assert.equal(summary.downloaded, 1);
+  assert.equal(await fs.readFile(finalPath, 'utf8'), 'raw-bytes');
+  await assert.rejects(() => fs.stat(`${finalPath}.part`), { code: 'ENOENT' });
+});
+
+test('executeDownloadPlan removes part file after failed download', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-part-fail-'));
+  const finalPath = path.join(root, '2026-05-01', 'DSC001.ARW');
+  const plan = {
+    favoritesScanned: 1,
+    rawMatches: 1,
+    fallbackOriginals: 0,
+    skippedExisting: 0,
+    plannedDownloads: [
+      {
+        asset: {
+          id: 'raw',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.ARW',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+        },
+        target: {
+          fileName: 'DSC001.ARW',
+          directoryPath: path.dirname(finalPath),
+          filePath: finalPath,
+        },
+        sizeBytes: 9,
+      },
+    ],
+    totalKnownBytes: 9,
+    unknownSizeFiles: 0,
+    failures: [],
+  };
+  const client = {
+    async downloadAsset() {
+      return Readable.from((async function* failAfterChunk() {
+        yield 'raw';
+        throw new Error('stream failed');
+      })());
+    },
+  };
+
+  const summary = await executeDownloadPlan({ client, plan, maxAttempts: 1 });
+
+  assert.equal(summary.downloaded, 0);
+  assert.equal(summary.failures.length, 1);
+  await assert.rejects(() => fs.stat(finalPath), { code: 'ENOENT' });
+  await assert.rejects(() => fs.stat(`${finalPath}.part`), { code: 'ENOENT' });
+});
+
+test('executeDownloadPlan retries transient download failures', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-retry-'));
+  const finalPath = path.join(root, '2026-05-01', 'DSC001.ARW');
+  let attempts = 0;
+  const plan = {
+    favoritesScanned: 1,
+    rawMatches: 1,
+    fallbackOriginals: 0,
+    skippedExisting: 0,
+    plannedDownloads: [
+      {
+        asset: {
+          id: 'raw',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.ARW',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+        },
+        target: {
+          fileName: 'DSC001.ARW',
+          directoryPath: path.dirname(finalPath),
+          filePath: finalPath,
+        },
+        sizeBytes: 9,
+      },
+    ],
+    totalKnownBytes: 9,
+    unknownSizeFiles: 0,
+    failures: [],
+  };
+  const client = {
+    async downloadAsset() {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error('temporary server error'), { status: 500 });
+      }
+      return Readable.from(['raw-bytes']);
+    },
+  };
+
+  const summary = await executeDownloadPlan({
+    client,
+    plan,
+    maxAttempts: 3,
+    retryBackoffMs: 0,
+    sleep: async () => {},
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(summary.downloaded, 1);
+  assert.equal(await fs.readFile(finalPath, 'utf8'), 'raw-bytes');
+});
+
+test('executeDownloadPlan does not retry non-transient download failures', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-no-retry-'));
+  const finalPath = path.join(root, '2026-05-01', 'DSC001.ARW');
+  let attempts = 0;
+  const plan = {
+    favoritesScanned: 1,
+    rawMatches: 1,
+    fallbackOriginals: 0,
+    skippedExisting: 0,
+    plannedDownloads: [
+      {
+        asset: {
+          id: 'raw',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.ARW',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+        },
+        target: {
+          fileName: 'DSC001.ARW',
+          directoryPath: path.dirname(finalPath),
+          filePath: finalPath,
+        },
+        sizeBytes: 9,
+      },
+    ],
+    totalKnownBytes: 9,
+    unknownSizeFiles: 0,
+    failures: [],
+  };
+  const client = {
+    async downloadAsset() {
+      attempts += 1;
+      throw Object.assign(new Error('not found'), { status: 404 });
+    },
+  };
+
+  const summary = await executeDownloadPlan({
+    client,
+    plan,
+    maxAttempts: 3,
+    retryBackoffMs: 0,
+    sleep: async () => {},
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(summary.downloaded, 0);
+  assert.equal(summary.failures.length, 1);
+});
+
+test('executeDownloadPlan fails stalled downloads with idle timeout', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-idle-timeout-'));
+  const finalPath = path.join(root, '2026-05-01', 'DSC001.ARW');
+  const plan = {
+    favoritesScanned: 1,
+    rawMatches: 1,
+    fallbackOriginals: 0,
+    skippedExisting: 0,
+    plannedDownloads: [
+      {
+        asset: {
+          id: 'raw',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.ARW',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+        },
+        target: {
+          fileName: 'DSC001.ARW',
+          directoryPath: path.dirname(finalPath),
+          filePath: finalPath,
+        },
+        sizeBytes: 9,
+      },
+    ],
+    totalKnownBytes: 9,
+    unknownSizeFiles: 0,
+    failures: [],
+  };
+  const client = {
+    async downloadAsset() {
+      return new Readable({
+        read() {},
+      });
+    },
+  };
+
+  const summary = await executeDownloadPlan({
+    client,
+    plan,
+    maxAttempts: 1,
+    downloadIdleTimeoutMs: 5,
+  });
+
+  assert.equal(summary.downloaded, 0);
+  assert.equal(summary.failures.length, 1);
+  assert.match(summary.failures[0].message, /stalled/);
+  await assert.rejects(() => fs.stat(`${finalPath}.part`), { code: 'ENOENT' });
 });
 
 test('planToSummary reports planned downloads for dry-run output', () => {

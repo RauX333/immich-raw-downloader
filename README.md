@@ -51,6 +51,9 @@ DOWNLOAD_DESTINATION=/path/to/download-folder
 IMMICH_DOWNLOAD_SOURCE=favorites
 IMMICH_ALBUM_ID=
 IMMICH_DOWNLOAD_MODE=raw
+IMMICH_DOWNLOAD_MAX_ATTEMPTS=3
+IMMICH_REQUEST_TIMEOUT_SECONDS=30
+IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS=120
 ```
 
 When settings are already present, the tool shows them before planning:
@@ -98,7 +101,7 @@ During downloads, progress is shown per file:
 Downloading DSC01234.ARW  111/324  25.0 MB / 100.0 MB  25.0 MB/s
 ```
 
-Files are saved into `YYYY-MM-DD` subfolders inside the destination folder. Existing files are skipped.
+Files are saved into `YYYY-MM-DD` subfolders using the computer's local timezone. Existing files are skipped. Downloads are written to temporary `.part` files first, then renamed after they finish, so interrupted transfers do not look complete.
 
 ## Useful Commands
 
@@ -162,6 +165,8 @@ If double-click is blocked by the OS or file manager, open a terminal in that bu
 
 - The download destination folder must already exist.
 - The tool does not delete or overwrite existing files.
+- If two planned files would use the same folder and filename, the later file gets a short asset-id suffix before its extension.
+- Downloads retry transient failures automatically. Advanced `.env` settings can tune `IMMICH_DOWNLOAD_MAX_ATTEMPTS`, `IMMICH_REQUEST_TIMEOUT_SECONDS`, and `IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS`.
 - `.env` is ignored by git because it may contain your API key.
 - Generated `dist/` bundles are ignored by git because they may contain a copied `.env`.
 

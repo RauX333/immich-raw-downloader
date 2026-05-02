@@ -1,7 +1,10 @@
 import { pipeline } from 'node:stream/promises';
 import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
+import { Transform } from 'node:stream';
 import {
+  DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
   DEFAULT_DOWNLOAD_MODE,
   DEFAULT_DOWNLOAD_SOURCE,
   DOWNLOAD_MODE_BOTH,
@@ -18,10 +21,11 @@ import {
   pickBestRawMatch,
   shouldDownloadFavoriteDirectly,
 } from './assetUtils.js';
-import { pathExists, prepareDownloadPath } from './fileUtils.js';
+import { buildConflictFilename, pathExists, prepareDownloadPath } from './fileUtils.js';
 import { createProgressStream, formatBytes } from './progress.js';
 
 const TWO_MINUTES_MS = 2 * 60 * 1000;
+const DEFAULT_RETRY_BACKOFF_MS = 500;
 
 export function getSearchWindow(asset, toleranceMs = TWO_MINUTES_MS) {
   const date = getCaptureDate(asset);
@@ -103,6 +107,10 @@ export async function downloadFavorites({
   albumId = null,
   downloadMode = DEFAULT_DOWNLOAD_MODE,
   progressReporter = null,
+  maxAttempts = DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
+  downloadIdleTimeoutMs = client?.downloadIdleTimeoutMs ?? DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  sleep = delay,
+  retryBackoffMs = DEFAULT_RETRY_BACKOFF_MS,
 }) {
   const plan = await planDownloads({
     client,
@@ -116,7 +124,15 @@ export async function downloadFavorites({
     return planToSummary(plan);
   }
 
-  return executeDownloadPlan({ client, plan, progressReporter });
+  return executeDownloadPlan({
+    client,
+    plan,
+    progressReporter,
+    maxAttempts,
+    downloadIdleTimeoutMs,
+    sleep,
+    retryBackoffMs,
+  });
 }
 
 export async function planDownloads({
@@ -171,8 +187,7 @@ async function addChoiceToPlan({ plan, destination, sourceAsset, choice, verbose
   const isRawMatch = choice.reason === 'raw-match'
     || choice.reason === 'source-is-raw'
     || choice.reason === 'favorite-is-raw';
-  const target = await prepareDownloadPath(destination, downloadAsset);
-  const exists = await pathExists(target.filePath);
+  const target = await resolvePlanTarget({ plan, destination, asset: downloadAsset });
 
   if (verbose) {
     console.log(
@@ -180,12 +195,8 @@ async function addChoiceToPlan({ plan, destination, sourceAsset, choice, verbose
     );
   }
 
-  if (exists) {
+  if (!target) {
     plan.skippedExisting += 1;
-    return;
-  }
-
-  if (plan.plannedDownloads.some((item) => item.target.filePath === target.filePath)) {
     return;
   }
 
@@ -215,36 +226,68 @@ async function addChoiceToPlan({ plan, destination, sourceAsset, choice, verbose
   }
 }
 
-export async function executeDownloadPlan({ client, plan, progressReporter = null }) {
+async function resolvePlanTarget({ plan, destination, asset }) {
+  const baseTarget = await prepareDownloadPath(destination, asset);
+  if (await pathExists(baseTarget.filePath)) {
+    return null;
+  }
+
+  if (!hasPlannedTarget(plan, baseTarget.filePath)) {
+    return baseTarget;
+  }
+
+  for (let conflictIndex = 1; conflictIndex < 1000; conflictIndex += 1) {
+    const fileName = buildConflictFilename(
+      baseTarget.fileName,
+      asset.id || 'asset',
+      conflictIndex,
+    );
+    const target = await prepareDownloadPath(destination, asset, { fileName });
+    if (hasPlannedTarget(plan, target.filePath)) {
+      continue;
+    }
+    if (await pathExists(target.filePath)) {
+      return null;
+    }
+
+    return target;
+  }
+
+  throw new Error(`Could not find a unique filename for ${baseTarget.fileName}`);
+}
+
+function hasPlannedTarget(plan, filePath) {
+  return plan.plannedDownloads.some((item) => item.target.filePath === filePath);
+}
+
+export async function executeDownloadPlan({
+  client,
+  plan,
+  progressReporter = null,
+  maxAttempts = DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
+  downloadIdleTimeoutMs = client?.downloadIdleTimeoutMs ?? DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  sleep = delay,
+  retryBackoffMs = DEFAULT_RETRY_BACKOFF_MS,
+} = {}) {
   const summary = planToSummary(plan);
   summary.dryRunPlanned = 0;
+  const attempts = normalizeMaxAttempts(maxAttempts);
 
   for (const [index, item] of plan.plannedDownloads.entries()) {
-    let progressStarted = false;
     try {
-      await fs.mkdir(item.target.directoryPath, { recursive: true });
-      const download = await client.downloadAsset(item.asset.id);
-      const stream = download.stream || download;
-      const totalBytes = download.totalBytes ?? item.sizeBytes ?? null;
-      progressReporter?.startFile({
-        filename: item.target.fileName,
-        index: index + 1,
+      await downloadPlanItem({
+        client,
+        item,
+        index,
         total: plan.plannedDownloads.length,
-        totalBytes,
+        progressReporter,
+        maxAttempts: attempts,
+        downloadIdleTimeoutMs,
+        sleep,
+        retryBackoffMs,
       });
-      progressStarted = true;
-      await pipeline(
-        stream,
-        createProgressStream({ totalBytes, reporter: progressReporter }),
-        createWriteStream(item.target.filePath, { flags: 'wx' }),
-      );
-      progressReporter?.finishFile();
-      progressStarted = false;
       summary.downloaded += 1;
     } catch (error) {
-      if (progressStarted) {
-        progressReporter?.failFile(error.message);
-      }
       summary.failures.push({
         assetId: item.asset.id,
         filename: getAssetFilename(item.asset),
@@ -254,6 +297,95 @@ export async function executeDownloadPlan({ client, plan, progressReporter = nul
   }
 
   return summary;
+}
+
+async function downloadPlanItem({
+  client,
+  item,
+  index,
+  total,
+  progressReporter,
+  maxAttempts,
+  downloadIdleTimeoutMs,
+  sleep,
+  retryBackoffMs,
+}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await downloadPlanItemOnce({
+        client,
+        item,
+        index,
+        total,
+        progressReporter,
+        downloadIdleTimeoutMs,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableDownloadError(error)) {
+        throw error;
+      }
+
+      await sleep(retryDelayMs(attempt, retryBackoffMs));
+    }
+  }
+
+  throw lastError;
+}
+
+async function downloadPlanItemOnce({
+  client,
+  item,
+  index,
+  total,
+  progressReporter,
+  downloadIdleTimeoutMs,
+}) {
+  let progressStarted = false;
+  const partialPath = `${item.target.filePath}.part`;
+  try {
+    await fs.mkdir(item.target.directoryPath, { recursive: true });
+    await fs.rm(partialPath, { force: true });
+    const download = await client.downloadAsset(item.asset.id);
+    const stream = download.stream || download;
+    const totalBytes = download.totalBytes ?? item.sizeBytes ?? null;
+    progressReporter?.startFile({
+      filename: item.target.fileName,
+      index: index + 1,
+      total,
+      totalBytes,
+    });
+    progressStarted = true;
+
+    const idleTimeoutStream = createIdleTimeoutStream({
+      idleTimeoutMs: downloadIdleTimeoutMs,
+      filename: item.target.fileName,
+    });
+    const streams = [
+      stream,
+      ...(idleTimeoutStream ? [idleTimeoutStream] : []),
+      createProgressStream({ totalBytes, reporter: progressReporter }),
+      createWriteStream(partialPath, { flags: 'wx' }),
+    ];
+
+    await pipeline(...streams);
+
+    if (await pathExists(item.target.filePath)) {
+      throw new Error(`Target already exists: ${item.target.filePath}`);
+    }
+
+    await fs.rename(partialPath, item.target.filePath);
+    progressReporter?.finishFile();
+    progressStarted = false;
+  } catch (error) {
+    await fs.rm(partialPath, { force: true });
+    if (progressStarted) {
+      progressReporter?.failFile(error.message);
+    }
+    throw error;
+  }
 }
 
 export function planToSummary(plan) {
@@ -356,4 +488,84 @@ function formatScannedLabel(value) {
   return normalizeDownloadSource(value?.downloadSource) === DOWNLOAD_SOURCE_ALBUM
     ? 'Album images scanned'
     : 'Favorites scanned';
+}
+
+export class DownloadIdleTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'DownloadIdleTimeoutError';
+  }
+}
+
+function createIdleTimeoutStream({ idleTimeoutMs, filename }) {
+  if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
+    return null;
+  }
+
+  let timeout = null;
+  let stream = null;
+  const resetTimeout = () => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      stream.destroy(new DownloadIdleTimeoutError(
+        `Download stalled for ${Math.round(idleTimeoutMs / 1000)} seconds: ${filename}`,
+      ));
+    }, idleTimeoutMs);
+  };
+  const clearIdleTimeout = () => clearTimeout(timeout);
+
+  stream = new Transform({
+    transform(chunk, encoding, callback) {
+      resetTimeout();
+      callback(null, chunk);
+    },
+    flush(callback) {
+      clearIdleTimeout();
+      callback();
+    },
+    destroy(error, callback) {
+      clearIdleTimeout();
+      callback(error);
+    },
+  });
+  resetTimeout();
+
+  return stream;
+}
+
+function isRetryableDownloadError(error) {
+  if (!error) {
+    return false;
+  }
+
+  if ([408, 429].includes(error.status) || (error.status >= 500 && error.status <= 599)) {
+    return true;
+  }
+
+  if (['AbortError', 'TimeoutError', 'ImmichRequestTimeoutError', 'DownloadIdleTimeoutError'].includes(error.name)) {
+    return true;
+  }
+
+  if (['ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'ENETDOWN', 'ENETRESET', 'ECONNABORTED'].includes(error.code)) {
+    return true;
+  }
+
+  return error instanceof TypeError;
+}
+
+function retryDelayMs(attempt, retryBackoffMs) {
+  return Math.max(0, retryBackoffMs) * (2 ** Math.max(0, attempt - 1));
+}
+
+function normalizeMaxAttempts(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_DOWNLOAD_MAX_ATTEMPTS;
+}
+
+function delay(ms) {
+  if (!ms) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

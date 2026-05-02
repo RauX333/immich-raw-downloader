@@ -9,6 +9,9 @@ export const DOWNLOAD_MODE_RAW = 'raw';
 export const DOWNLOAD_MODE_ORIGINAL = 'original';
 export const DOWNLOAD_MODE_BOTH = 'both';
 export const DEFAULT_DOWNLOAD_MODE = DOWNLOAD_MODE_RAW;
+export const DEFAULT_DOWNLOAD_MAX_ATTEMPTS = 3;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+export const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 
 export function loadDotenv(filePath = path.resolve(process.cwd(), '.env')) {
   if (!fs.existsSync(filePath)) {
@@ -90,8 +93,30 @@ export function readConfigFromEnv(env = process.env) {
   const downloadSource = normalizeDownloadSource(env.IMMICH_DOWNLOAD_SOURCE);
   const albumId = env.IMMICH_ALBUM_ID || null;
   const downloadMode = normalizeDownloadMode(env.IMMICH_DOWNLOAD_MODE);
+  const downloadMaxAttempts = parsePositiveInteger(
+    env.IMMICH_DOWNLOAD_MAX_ATTEMPTS,
+    DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
+  );
+  const requestTimeoutMs = parsePositiveSeconds(
+    env.IMMICH_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT_MS,
+  );
+  const downloadIdleTimeoutMs = parsePositiveSeconds(
+    env.IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  );
 
-  return { immichUrl, apiKey, downloadDestination, downloadSource, albumId, downloadMode };
+  return {
+    immichUrl,
+    apiKey,
+    downloadDestination,
+    downloadSource,
+    albumId,
+    downloadMode,
+    downloadMaxAttempts,
+    requestTimeoutMs,
+    downloadIdleTimeoutMs,
+  };
 }
 
 export function normalizeDownloadSource(value) {
@@ -190,6 +215,16 @@ function formatEnvValue(value) {
   return JSON.stringify(text);
 }
 
+function parsePositiveSeconds(value, fallbackMs) {
+  const parsed = parsePositiveInteger(value, null);
+  return parsed === null ? fallbackMs : parsed * 1000;
+}
+
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number(String(value || '').trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export function helpText() {
   return `Immich Favorite RAW Downloader
 
@@ -206,6 +241,12 @@ Environment:
   IMMICH_ALBUM_ID  Album ID or album URL to use when IMMICH_DOWNLOAD_SOURCE=album
   IMMICH_DOWNLOAD_MODE
                    Optional download mode: raw, original, or both
+  IMMICH_DOWNLOAD_MAX_ATTEMPTS
+                   Optional download retry attempts, default 3
+  IMMICH_REQUEST_TIMEOUT_SECONDS
+                   Optional request timeout before response starts, default 30
+  IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS
+                   Optional download idle timeout between chunks, default 120
 
 Options:
   --dest <folder>  Destination folder. Overrides DOWNLOAD_DESTINATION.

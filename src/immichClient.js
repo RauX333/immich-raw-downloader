@@ -1,7 +1,33 @@
 import { Readable } from 'node:stream';
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
+
+export class ImmichApiError extends Error {
+  constructor(message, { status = null, statusText = '', body = '' } = {}) {
+    super(message);
+    this.name = 'ImmichApiError';
+    this.status = status;
+    this.statusText = statusText;
+    this.body = body;
+  }
+}
+
+export class ImmichRequestTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ImmichRequestTimeoutError';
+  }
+}
+
 export class ImmichClient {
-  constructor({ baseUrl, apiKey, fetchImpl = globalThis.fetch }) {
+  constructor({
+    baseUrl,
+    apiKey,
+    fetchImpl = globalThis.fetch,
+    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    downloadIdleTimeoutMs = DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  }) {
     if (!fetchImpl) {
       throw new Error('This program requires Node.js 18 or newer with built-in fetch.');
     }
@@ -9,6 +35,11 @@ export class ImmichClient {
     this.baseUrl = normalizeImmichBaseUrl(baseUrl);
     this.apiKey = apiKey;
     this.fetch = fetchImpl;
+    this.requestTimeoutMs = normalizeTimeoutMs(requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+    this.downloadIdleTimeoutMs = normalizeTimeoutMs(
+      downloadIdleTimeoutMs,
+      DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+    );
   }
 
   async searchMetadata(body) {
@@ -120,17 +151,40 @@ export class ImmichClient {
 
   async #request(pathname, init = {}) {
     const relativePath = pathname.replace(/^\/+/, '');
-    const response = await this.fetch(new URL(relativePath, this.baseUrl), {
-      ...init,
-      headers: {
-        'x-api-key': this.apiKey,
-        ...(init.headers || {}),
-      },
-    });
+    const url = new URL(relativePath, this.baseUrl);
+    const { signal, clear } = createTimeoutSignal(
+      this.requestTimeoutMs,
+      `Immich request timed out after ${formatSeconds(this.requestTimeoutMs)} seconds: ${url.pathname}`,
+    );
+    let response;
+    try {
+      response = await this.fetch(url, {
+        ...init,
+        signal,
+        headers: {
+          'x-api-key': this.apiKey,
+          ...(init.headers || {}),
+        },
+      });
+    } catch (error) {
+      if (signal.aborted) {
+        throw signal.reason;
+      }
+      throw error;
+    } finally {
+      clear();
+    }
 
     if (!response.ok) {
       const message = await readErrorResponse(response);
-      throw new Error(`Immich API ${response.status} ${response.statusText}: ${message}`);
+      throw new ImmichApiError(
+        `Immich API ${response.status} ${response.statusText}: ${message}`,
+        {
+          status: response.status,
+          statusText: response.statusText,
+          body: message,
+        },
+      );
     }
 
     return response;
@@ -176,4 +230,25 @@ function parseContentLength(value) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function createTimeoutSignal(timeoutMs, message) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new ImmichRequestTimeoutError(message));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeout),
+  };
+}
+
+function normalizeTimeoutMs(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatSeconds(timeoutMs) {
+  return Math.round(timeoutMs / 1000);
 }

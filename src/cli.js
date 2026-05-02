@@ -35,7 +35,12 @@ export async function runCli(argv = process.argv.slice(2)) {
     downloadMode: config.downloadMode,
     allowDestinationChange: !options.destination,
     listAlbums: async ({ immichUrl, apiKey }) => {
-      const settingsClient = new ImmichClient({ baseUrl: immichUrl, apiKey });
+      const settingsClient = new ImmichClient({
+        baseUrl: immichUrl,
+        apiKey,
+        requestTimeoutMs: config.requestTimeoutMs,
+        downloadIdleTimeoutMs: config.downloadIdleTimeoutMs,
+      });
       return settingsClient.listAlbums();
     },
   });
@@ -50,6 +55,8 @@ export async function runCli(argv = process.argv.slice(2)) {
   const client = new ImmichClient({
     baseUrl: runConfig.immichUrl,
     apiKey: runConfig.apiKey,
+    requestTimeoutMs: config.requestTimeoutMs,
+    downloadIdleTimeoutMs: config.downloadIdleTimeoutMs,
   });
 
   console.log(`immich url: ${runConfig.immichUrl}`);
@@ -71,7 +78,12 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (options.dryRun) {
     summary = planToSummary(plan);
   } else if (plan.plannedDownloads.length === 0) {
-    summary = await executeDownloadPlan({ client, plan });
+    summary = await executeDownloadPlan({
+      client,
+      plan,
+      maxAttempts: config.downloadMaxAttempts,
+      downloadIdleTimeoutMs: config.downloadIdleTimeoutMs,
+    });
   } else {
     const confirmed = await confirmDownloadPlan();
     if (!confirmed) {
@@ -83,6 +95,8 @@ export async function runCli(argv = process.argv.slice(2)) {
       client,
       plan,
       progressReporter: new ProgressReporter(),
+      maxAttempts: config.downloadMaxAttempts,
+      downloadIdleTimeoutMs: config.downloadIdleTimeoutMs,
     });
   }
 

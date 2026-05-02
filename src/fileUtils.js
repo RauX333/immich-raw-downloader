@@ -88,11 +88,32 @@ export async function pathExists(targetPath) {
   }
 }
 
-export async function prepareDownloadPath(destinationRoot, asset) {
+export async function prepareDownloadPath(destinationRoot, asset, options = {}) {
   const dateFolder = getDateFolderName(asset);
-  const fileName = sanitizeFilename(getAssetFilename(asset), `${asset.id || 'asset'}`);
+  const fileName = options.fileName
+    ? sanitizeFilename(options.fileName, `${asset.id || 'asset'}`)
+    : sanitizeFilename(getAssetFilename(asset), `${asset.id || 'asset'}`);
   const directoryPath = resolveInside(destinationRoot, dateFolder);
   const filePath = resolveInside(directoryPath, fileName);
 
   return { dateFolder, fileName, directoryPath, filePath };
+}
+
+export function buildConflictFilename(filename, assetId, conflictIndex = 1) {
+  const safeFilename = sanitizeFilename(filename);
+  const extension = path.extname(safeFilename);
+  const stem = extension ? safeFilename.slice(0, -extension.length) : safeFilename;
+  const suffix = sanitizeConflictSuffix(assetId);
+  const counter = conflictIndex > 1 ? `-${conflictIndex}` : '';
+
+  return sanitizeFilename(`${stem}.${suffix}${counter}${extension}`);
+}
+
+function sanitizeConflictSuffix(value) {
+  const suffix = sanitizeFilename(value || 'asset', 'asset')
+    .replace(/\.+/g, '_')
+    .slice(0, 12)
+    .replace(/[ .]+$/g, '');
+
+  return suffix || 'asset';
 }

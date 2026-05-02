@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ReadableStream } from 'node:stream/web';
-import { ImmichClient, normalizeImmichBaseUrl, normalizeSearchResponse } from '../src/immichClient.js';
+import {
+  ImmichApiError,
+  ImmichClient,
+  ImmichRequestTimeoutError,
+  normalizeImmichBaseUrl,
+  normalizeSearchResponse,
+} from '../src/immichClient.js';
 
 test('normalizes Immich base URLs to /api/', () => {
   assert.equal(String(normalizeImmichBaseUrl('http://example.test')), 'http://example.test/api/');
@@ -128,4 +134,45 @@ test('downloadAsset returns a node readable stream', async () => {
 
   assert.equal(download.totalBytes, 9);
   assert.equal(Buffer.concat(chunks).toString('utf8'), 'raw-bytes');
+});
+
+test('client errors include Immich API status for retry decisions', async () => {
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'key',
+    fetchImpl: async () => new Response('try later', {
+      status: 503,
+      statusText: 'Service Unavailable',
+    }),
+  });
+
+  await assert.rejects(
+    () => client.listAlbums(),
+    (error) => {
+      assert.equal(error instanceof ImmichApiError, true);
+      assert.equal(error.status, 503);
+      assert.match(error.message, /try later/);
+      return true;
+    },
+  );
+});
+
+test('client aborts requests that do not receive a response in time', async () => {
+  const client = new ImmichClient({
+    baseUrl: 'http://immich.test',
+    apiKey: 'key',
+    requestTimeoutMs: 5,
+    fetchImpl: async (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+    }),
+  });
+
+  await assert.rejects(
+    () => client.listAlbums(),
+    (error) => {
+      assert.equal(error instanceof ImmichRequestTimeoutError, true);
+      assert.match(error.message, /timed out/);
+      return true;
+    },
+  );
 });

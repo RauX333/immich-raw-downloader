@@ -3,7 +3,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { parseArgs, readConfigFromEnv, saveConfigToEnv } from '../src/config.js';
+import {
+  DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  parseArgs,
+  readConfigFromEnv,
+  saveConfigToEnv,
+} from '../src/config.js';
+
+const defaultAdvancedConfig = {
+  downloadMaxAttempts: DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
+  requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
+  downloadIdleTimeoutMs: DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+};
 
 test('reads optional download destination from environment', () => {
   assert.deepEqual(readConfigFromEnv({
@@ -17,6 +30,7 @@ test('reads optional download destination from environment', () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultAdvancedConfig,
   });
 });
 
@@ -31,6 +45,7 @@ test('download destination is optional when env is missing', () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultAdvancedConfig,
   });
 });
 
@@ -42,6 +57,7 @@ test('connection settings can be missing before first-run prompts', () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultAdvancedConfig,
   });
 });
 
@@ -59,6 +75,7 @@ test('reads album download source and original download mode from environment', 
     downloadSource: 'album',
     albumId: 'album-id',
     downloadMode: 'original',
+    ...defaultAdvancedConfig,
   });
 });
 
@@ -66,6 +83,30 @@ test('reads both download mode from environment', () => {
   assert.equal(readConfigFromEnv({
     IMMICH_DOWNLOAD_MODE: 'both',
   }).downloadMode, 'both');
+});
+
+test('reads advanced retry and timeout settings from environment', () => {
+  const config = readConfigFromEnv({
+    IMMICH_DOWNLOAD_MAX_ATTEMPTS: '5',
+    IMMICH_REQUEST_TIMEOUT_SECONDS: '10',
+    IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS: '45',
+  });
+
+  assert.equal(config.downloadMaxAttempts, 5);
+  assert.equal(config.requestTimeoutMs, 10_000);
+  assert.equal(config.downloadIdleTimeoutMs, 45_000);
+});
+
+test('uses defaults for invalid advanced retry and timeout settings', () => {
+  const config = readConfigFromEnv({
+    IMMICH_DOWNLOAD_MAX_ATTEMPTS: '0',
+    IMMICH_REQUEST_TIMEOUT_SECONDS: 'bad',
+    IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS: '-1',
+  });
+
+  assert.equal(config.downloadMaxAttempts, DEFAULT_DOWNLOAD_MAX_ATTEMPTS);
+  assert.equal(config.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+  assert.equal(config.downloadIdleTimeoutMs, DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS);
 });
 
 test('saveConfigToEnv persists settings while preserving unrelated lines', async () => {

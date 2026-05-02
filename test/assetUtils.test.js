@@ -4,6 +4,7 @@ import {
   getAssetSizeBytes,
   getDateFolderName,
   getStem,
+  formatLocalDateFolder,
   isRawFilename,
   normalizeStem,
   pickBestRawMatch,
@@ -21,12 +22,24 @@ test('extracts stems from Windows-looking and POSIX-looking paths', () => {
   assert.equal(normalizeStem('Ä.RAF'), normalizeStem('ä.jpg'));
 });
 
-test('uses ISO date folders from capture date', () => {
+test('uses computer-local date folders from capture date', () => {
+  const date = new Date('2026-04-30T16:05:00.000Z');
   assert.equal(
     getDateFolderName({ fileCreatedAt: '2026-04-30T16:05:00.000Z' }),
-    '2026-04-30',
+    formatLocalDateFolder(date),
   );
   assert.equal(getDateFolderName({}), 'unknown-date');
+});
+
+test('local date folder formatting follows host timezone boundaries', () => {
+  const date = new Date('2026-05-01T00:30:00.000Z');
+  const expected = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+
+  assert.equal(getDateFolderName({ fileCreatedAt: date.toISOString() }), expected);
 });
 
 test('extracts asset sizes from common Immich metadata fields', () => {
