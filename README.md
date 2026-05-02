@@ -34,7 +34,9 @@ Immich API key: your-api-key
 Download destination: /path/to/download-folder
 ```
 
-To avoid entering settings each time, create a local `.env` file:
+After you enter the required settings, the tool creates a local `.env` file automatically and uses those saved values the next time it runs.
+
+You can also create or edit `.env` yourself if you want to prefill settings before launching the tool:
 
 ```sh
 cp .env.example .env

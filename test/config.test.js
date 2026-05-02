@@ -86,6 +86,28 @@ test('saveConfigToEnv persists settings while preserving unrelated lines', async
   assert.match(content, /^IMMICH_DOWNLOAD_MODE=original/m);
 });
 
+test('saveConfigToEnv creates .env when it does not exist', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-env-create-'));
+  const envPath = path.join(root, '.env');
+
+  await saveConfigToEnv({
+    immichUrl: 'http://immich.test',
+    apiKey: 'key',
+    downloadDestination: '/downloads',
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
+  }, envPath);
+
+  const content = await fs.readFile(envPath, 'utf8');
+  assert.match(content, /^IMMICH_URL=http:\/\/immich\.test/m);
+  assert.match(content, /^IMMICH_API_KEY=key/m);
+  assert.match(content, /^DOWNLOAD_DESTINATION=\/downloads/m);
+  assert.match(content, /^IMMICH_DOWNLOAD_SOURCE=favorites/m);
+  assert.match(content, /^IMMICH_ALBUM_ID=$/m);
+  assert.match(content, /^IMMICH_DOWNLOAD_MODE=raw/m);
+});
+
 test('command-line destination still parses as an override', () => {
   assert.equal(parseArgs(['--dest', '/override']).destination, '/override');
   assert.equal(parseArgs(['--destination=/override']).destination, '/override');
