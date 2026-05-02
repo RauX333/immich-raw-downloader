@@ -205,6 +205,81 @@ test('planDownloads downloads original images when original mode is selected', a
   assert.match(formatSummary(planToSummary(plan)), /Original images: 1/);
 });
 
+test('planDownloads downloads RAW and original images when both mode is selected', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-both-plan-'));
+  const client = {
+    async listFavoriteImages() {
+      return [
+        {
+          id: 'favorite',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.JPG',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+          exifInfo: { fileSizeInByte: 100 },
+        },
+      ];
+    },
+    async searchRawCandidates() {
+      return [
+        {
+          id: 'raw',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.ARW',
+          fileCreatedAt: '2026-05-01T10:00:01.000Z',
+          exifInfo: { fileSizeInByte: 200 },
+        },
+      ];
+    },
+  };
+
+  const plan = await planDownloads({
+    client,
+    destination: root,
+    downloadMode: 'both',
+  });
+
+  assert.equal(plan.downloadMode, 'both');
+  assert.equal(plan.plannedDownloads.length, 2);
+  assert.deepEqual(plan.plannedDownloads.map((item) => item.asset.id), ['favorite', 'raw']);
+  assert.equal(plan.rawMatches, 1);
+  assert.equal(plan.originalDownloads, 1);
+  assert.equal(plan.fallbackOriginals, 0);
+  assert.equal(plan.totalKnownBytes, 300);
+  assert.match(formatDownloadPlan(plan), /Mode: RAW versions and original images/);
+  assert.match(formatSummary(planToSummary(plan)), /Original images: 1/);
+});
+
+test('planDownloads avoids duplicate downloads in both mode when source is RAW', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-both-raw-plan-'));
+  const client = {
+    async listFavoriteImages() {
+      return [
+        {
+          id: 'favorite-raw',
+          type: 'IMAGE',
+          originalFileName: 'DSC001.ARW',
+          fileCreatedAt: '2026-05-01T10:00:00.000Z',
+          exifInfo: { fileSizeInByte: 200 },
+        },
+      ];
+    },
+    async searchRawCandidates() {
+      throw new Error('source RAW should not search for RAW candidates');
+    },
+  };
+
+  const plan = await planDownloads({
+    client,
+    destination: root,
+    downloadMode: 'both',
+  });
+
+  assert.equal(plan.plannedDownloads.length, 1);
+  assert.equal(plan.rawMatches, 1);
+  assert.equal(plan.originalDownloads, 0);
+  assert.equal(plan.plannedDownloads[0].asset.id, 'favorite-raw');
+});
+
 test('planDownloads can scan album images instead of favorites', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-raw-album-plan-'));
   const client = {

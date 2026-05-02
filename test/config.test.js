@@ -62,6 +62,12 @@ test('reads album download source and original download mode from environment', 
   });
 });
 
+test('reads both download mode from environment', () => {
+  assert.equal(readConfigFromEnv({
+    IMMICH_DOWNLOAD_MODE: 'both',
+  }).downloadMode, 'both');
+});
+
 test('saveConfigToEnv persists settings while preserving unrelated lines', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-env-save-'));
   const envPath = path.join(root, '.env');
@@ -73,7 +79,7 @@ test('saveConfigToEnv persists settings while preserving unrelated lines', async
     downloadDestination: '/downloads',
     downloadSource: 'album',
     albumId: 'album-id',
-    downloadMode: 'original',
+    downloadMode: 'both',
   }, envPath);
 
   const content = await fs.readFile(envPath, 'utf8');
@@ -83,7 +89,7 @@ test('saveConfigToEnv persists settings while preserving unrelated lines', async
   assert.match(content, /^DOWNLOAD_DESTINATION=\/downloads/m);
   assert.match(content, /^IMMICH_DOWNLOAD_SOURCE=album/m);
   assert.match(content, /^IMMICH_ALBUM_ID=album-id/m);
-  assert.match(content, /^IMMICH_DOWNLOAD_MODE=original/m);
+  assert.match(content, /^IMMICH_DOWNLOAD_MODE=both/m);
 });
 
 test('saveConfigToEnv creates .env when it does not exist', async () => {

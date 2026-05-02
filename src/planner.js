@@ -4,7 +4,9 @@ import { createWriteStream } from 'node:fs';
 import {
   DEFAULT_DOWNLOAD_MODE,
   DEFAULT_DOWNLOAD_SOURCE,
+  DOWNLOAD_MODE_BOTH,
   DOWNLOAD_MODE_ORIGINAL,
+  DOWNLOAD_MODE_RAW,
   DOWNLOAD_SOURCE_ALBUM,
   normalizeDownloadMode,
   normalizeDownloadSource,
@@ -66,6 +68,32 @@ export async function chooseDownloadAsset(client, sourceAsset, options = {}) {
     : { asset: sourceAsset, reason: 'no-raw-match' };
 }
 
+export async function chooseDownloadAssets(client, sourceAsset, options = {}) {
+  const mode = normalizeDownloadMode(options.downloadMode);
+  if (mode !== DOWNLOAD_MODE_BOTH) {
+    return [await chooseDownloadAsset(client, sourceAsset, { ...options, downloadMode: mode })];
+  }
+
+  const choices = [
+    {
+      asset: sourceAsset,
+      reason: 'original-selected',
+    },
+  ];
+  const rawChoice = await chooseDownloadAsset(client, sourceAsset, {
+    ...options,
+    downloadMode: DOWNLOAD_MODE_RAW,
+  });
+
+  if (rawChoice.asset.id !== sourceAsset.id) {
+    choices.push(rawChoice);
+  } else if (rawChoice.reason !== 'no-raw-match') {
+    choices[0] = rawChoice;
+  }
+
+  return choices;
+}
+
 export async function downloadFavorites({
   client,
   destination,
@@ -122,48 +150,9 @@ export async function planDownloads({
 
   for (const sourceAsset of sourceImages) {
     try {
-      const choice = await chooseDownloadAsset(client, sourceAsset, { downloadMode: mode });
-      const downloadAsset = choice.asset;
-      const isRawMatch = choice.reason === 'raw-match'
-        || choice.reason === 'source-is-raw'
-        || choice.reason === 'favorite-is-raw';
-      const target = await prepareDownloadPath(destination, downloadAsset);
-      const exists = await pathExists(target.filePath);
-
-      if (verbose) {
-        console.log(
-          `${getAssetFilename(sourceAsset)} -> ${getAssetFilename(downloadAsset)} (${choice.reason})`,
-        );
-      }
-
-      if (exists) {
-        plan.skippedExisting += 1;
-        continue;
-      }
-
-      const sizeBytes = getAssetSizeBytes(downloadAsset);
-      if (sizeBytes === null) {
-        plan.unknownSizeFiles += 1;
-      } else {
-        plan.totalKnownBytes += sizeBytes;
-      }
-
-      plan.plannedDownloads.push({
-        favorite: sourceAsset,
-        sourceAsset,
-        asset: downloadAsset,
-        target,
-        reason: choice.reason,
-        isRawMatch,
-        sizeBytes,
-      });
-
-      if (choice.reason === 'original-selected') {
-        plan.originalDownloads += 1;
-      } else if (isRawMatch) {
-        plan.rawMatches += 1;
-      } else {
-        plan.fallbackOriginals += 1;
+      const choices = await chooseDownloadAssets(client, sourceAsset, { downloadMode: mode });
+      for (const choice of choices) {
+        await addChoiceToPlan({ plan, destination, sourceAsset, choice, verbose });
       }
     } catch (error) {
       plan.failures.push({
@@ -175,6 +164,55 @@ export async function planDownloads({
   }
 
   return plan;
+}
+
+async function addChoiceToPlan({ plan, destination, sourceAsset, choice, verbose }) {
+  const downloadAsset = choice.asset;
+  const isRawMatch = choice.reason === 'raw-match'
+    || choice.reason === 'source-is-raw'
+    || choice.reason === 'favorite-is-raw';
+  const target = await prepareDownloadPath(destination, downloadAsset);
+  const exists = await pathExists(target.filePath);
+
+  if (verbose) {
+    console.log(
+      `${getAssetFilename(sourceAsset)} -> ${getAssetFilename(downloadAsset)} (${choice.reason})`,
+    );
+  }
+
+  if (exists) {
+    plan.skippedExisting += 1;
+    return;
+  }
+
+  if (plan.plannedDownloads.some((item) => item.target.filePath === target.filePath)) {
+    return;
+  }
+
+  const sizeBytes = getAssetSizeBytes(downloadAsset);
+  if (sizeBytes === null) {
+    plan.unknownSizeFiles += 1;
+  } else {
+    plan.totalKnownBytes += sizeBytes;
+  }
+
+  plan.plannedDownloads.push({
+    favorite: sourceAsset,
+    sourceAsset,
+    asset: downloadAsset,
+    target,
+    reason: choice.reason,
+    isRawMatch,
+    sizeBytes,
+  });
+
+  if (choice.reason === 'original-selected') {
+    plan.originalDownloads += 1;
+  } else if (isRawMatch) {
+    plan.rawMatches += 1;
+  } else {
+    plan.fallbackOriginals += 1;
+  }
 }
 
 export async function executeDownloadPlan({ client, plan, progressReporter = null }) {
@@ -303,9 +341,15 @@ function formatSourceLabel(downloadSource = DEFAULT_DOWNLOAD_SOURCE) {
 }
 
 function formatModeLabel(downloadMode = DEFAULT_DOWNLOAD_MODE) {
-  return normalizeDownloadMode(downloadMode) === DOWNLOAD_MODE_ORIGINAL
-    ? 'original images'
-    : 'RAW versions';
+  const mode = normalizeDownloadMode(downloadMode);
+  if (mode === DOWNLOAD_MODE_ORIGINAL) {
+    return 'original images';
+  }
+  if (mode === DOWNLOAD_MODE_BOTH) {
+    return 'RAW versions and original images';
+  }
+
+  return 'RAW versions';
 }
 
 function formatScannedLabel(value) {

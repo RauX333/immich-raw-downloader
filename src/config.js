@@ -7,6 +7,7 @@ export const DOWNLOAD_SOURCE_ALBUM = 'album';
 export const DEFAULT_DOWNLOAD_SOURCE = DOWNLOAD_SOURCE_FAVORITES;
 export const DOWNLOAD_MODE_RAW = 'raw';
 export const DOWNLOAD_MODE_ORIGINAL = 'original';
+export const DOWNLOAD_MODE_BOTH = 'both';
 export const DEFAULT_DOWNLOAD_MODE = DOWNLOAD_MODE_RAW;
 
 export function loadDotenv(filePath = path.resolve(process.cwd(), '.env')) {
@@ -107,6 +108,9 @@ export function normalizeDownloadMode(value) {
   if (normalized === DOWNLOAD_MODE_ORIGINAL) {
     return DOWNLOAD_MODE_ORIGINAL;
   }
+  if (normalized === DOWNLOAD_MODE_BOTH) {
+    return DOWNLOAD_MODE_BOTH;
+  }
 
   return DOWNLOAD_MODE_RAW;
 }
@@ -201,7 +205,7 @@ Environment:
                    Optional default source: favorites or album
   IMMICH_ALBUM_ID  Album ID or album URL to use when IMMICH_DOWNLOAD_SOURCE=album
   IMMICH_DOWNLOAD_MODE
-                   Optional download mode: raw or original
+                   Optional download mode: raw, original, or both
 
 Options:
   --dest <folder>  Destination folder. Overrides DOWNLOAD_DESTINATION.

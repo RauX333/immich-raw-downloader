@@ -1,6 +1,6 @@
 # Immich Favorite RAW Downloader
 
-Download the RAW versions of your favorite Immich images or images from a chosen Immich album. You can also switch the download mode to save the selected images directly without looking for RAW matches.
+Download the RAW versions of your favorite Immich images or images from a chosen Immich album. You can also switch the download mode to save the selected images directly, or download both the RAW match and the selected image.
 
 The app is a dependency-free Node.js command-line tool for macOS, Linux, and Windows. It can be run from a terminal or from the generated clickable launchers.
 
@@ -66,7 +66,7 @@ Current settings
 Press Enter to continue planning, or type anything to edit settings:
 ```
 
-Press Return once to keep the settings and start planning. Type anything else, then press Return, to open the settings menu before planning. From there, choose a setting by number, or press Return when done. Type `back` inside any setting prompt to return to the settings menu without changing that value. The API key is masked on screen. If you choose `album`, the tool loads your Immich albums and lets you pick one by number. If you choose `original` mode, the tool downloads selected images directly and skips RAW matching. Your selected settings are saved to `.env` and become the default for the next run.
+Press Return once to keep the settings and start planning. Type anything else, then press Return, to open the settings menu before planning. From there, choose a setting by number, or press Return when done. Type `back` inside any setting prompt to return to the settings menu without changing that value. The API key is masked on screen. If you choose `album`, the tool loads your Immich albums and lets you pick one by number. If you choose `original` mode, the tool downloads selected images directly and skips RAW matching. If you choose `both` mode, the tool downloads the selected image and its RAW match when one exists. Your selected settings are saved to `.env` and become the default for the next run.
 
 ## Download Flow
 
@@ -152,6 +152,7 @@ If double-click is blocked by the OS or file manager, open a terminal in that bu
 - If `IMMICH_DOWNLOAD_SOURCE=album`, the tool loads images from the selected `IMMICH_ALBUM_ID` instead.
 - If `IMMICH_DOWNLOAD_MODE=raw`, for each selected image, it searches nearby image assets taken within 2 minutes.
 - If `IMMICH_DOWNLOAD_MODE=original`, it downloads the selected image itself and does not search for RAW candidates.
+- If `IMMICH_DOWNLOAD_MODE=both`, it downloads the selected image itself and also downloads the matching RAW asset when one exists.
 - A RAW candidate must have the same filename stem, such as `DSC01234.JPG` and `DSC01234.ARW`.
 - Common RAW formats are recognized, including `.arw`, `.cr2`, `.cr3`, `.nef`, `.raf`, `.rw2`, `.orf`, `.dng`, and others.
 - If multiple RAW candidates match, the closest capture time wins.

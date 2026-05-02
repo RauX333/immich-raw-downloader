@@ -275,6 +275,30 @@ test('chooseRunConfig lets user choose original image download mode', async () =
   });
 });
 
+test('chooseRunConfig lets user choose both download mode', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-both-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    inputStream: input,
+    outputStream: output,
+  });
+  feedLines(input, ['e', '5', 'both', '']);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'both',
+  });
+});
+
 test('chooseRunConfig can go back from a setting prompt without changing it', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-back-'));
   const input = new PassThrough();

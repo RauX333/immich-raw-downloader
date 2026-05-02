@@ -4,6 +4,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import {
   DEFAULT_DOWNLOAD_MODE,
   DEFAULT_DOWNLOAD_SOURCE,
+  DOWNLOAD_MODE_BOTH,
   DOWNLOAD_MODE_ORIGINAL,
   DOWNLOAD_MODE_RAW,
   DOWNLOAD_SOURCE_ALBUM,
@@ -326,7 +327,7 @@ async function promptForDownloadMode(rl, currentMode, { allowBack = false } = {}
   while (true) {
     const currentLabel = formatDownloadMode(currentMode);
     const backHint = allowBack ? ', or back' : '';
-    const answer = await rl.question(`Download mode [${currentLabel}] (raw/original${backHint}): `);
+    const answer = await rl.question(`Download mode [${currentLabel}] (raw/original/both${backHint}): `);
     if (allowBack && isBackCommand(answer)) {
       return BACK;
     }
@@ -574,7 +575,15 @@ export function formatDownloadSource(source) {
 }
 
 export function formatDownloadMode(mode) {
-  return normalizeDownloadMode(mode) === DOWNLOAD_MODE_ORIGINAL ? 'original' : 'raw';
+  const normalized = normalizeDownloadMode(mode);
+  if (normalized === DOWNLOAD_MODE_ORIGINAL) {
+    return 'original';
+  }
+  if (normalized === DOWNLOAD_MODE_BOTH) {
+    return 'both';
+  }
+
+  return 'raw';
 }
 
 export function normalizeAlbumIdInput(value) {
@@ -626,6 +635,9 @@ function normalizeDownloadModeInput(value, currentMode) {
 
   if (['o', 'original', 'originals', 'image', 'images', '2'].includes(answer)) {
     return DOWNLOAD_MODE_ORIGINAL;
+  }
+  if (['b', 'both', 'all', '3'].includes(answer)) {
+    return DOWNLOAD_MODE_BOTH;
   }
 
   return null;

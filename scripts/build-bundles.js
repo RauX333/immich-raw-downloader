@@ -98,7 +98,7 @@ How to run:
 2. Double-click:
    ${launcher}
 
-The launcher opens or uses a terminal window. If .env is missing or incomplete, enter IMMICH_URL, IMMICH_API_KEY, and the download destination when prompted. In the settings menu, you can keep the default favorite-image source or choose an Immich album from a numbered album list. You can also keep the default RAW mode or choose original-image mode. Type back inside a setting prompt to return to the settings menu.
+The launcher opens or uses a terminal window. If .env is missing or incomplete, enter IMMICH_URL, IMMICH_API_KEY, and the download destination when prompted. In the settings menu, you can keep the default favorite-image source or choose an Immich album from a numbered album list. You can also choose RAW, original-image, or both download mode. Type back inside a setting prompt to return to the settings menu.
 
 After settings are entered, the launcher saves them to .env, shows the download plan, asks for confirmation, and then downloads files.
 

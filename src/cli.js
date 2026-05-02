@@ -55,7 +55,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   console.log(`immich url: ${runConfig.immichUrl}`);
   console.log(`download destination: ${runConfig.destination}`);
   console.log(`download source: ${runConfig.downloadSource === 'album' ? 'Immich album' : 'favorite images'}`);
-  console.log(`download mode: ${runConfig.downloadMode === 'original' ? 'original images' : 'RAW versions'}`);
+  console.log(`download mode: ${formatRunDownloadMode(runConfig.downloadMode)}`);
   console.log('Planning download...');
   const plan = await planDownloads({
     client,
@@ -91,4 +91,15 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (summary.failures.length > 0) {
     process.exitCode = 1;
   }
+}
+
+function formatRunDownloadMode(downloadMode) {
+  if (downloadMode === 'original') {
+    return 'original images';
+  }
+  if (downloadMode === 'both') {
+    return 'RAW versions and original images';
+  }
+
+  return 'RAW versions';
 }
