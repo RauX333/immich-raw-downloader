@@ -130,13 +130,13 @@ npm start -- --dest C:\Users\you\Pictures\ImmichRaw
 
 ## Clickable Launchers
 
-Build platform folders:
+To create portable platform folders, run:
 
 ```sh
 npm run build:bundles
 ```
 
-This creates:
+Then run the script for your platform:
 
 - `dist/immich-raw-downloader-macos/Run Immich RAW Downloader.command`
 - `dist/immich-raw-downloader-linux/run-immich-raw-downloader.sh`
