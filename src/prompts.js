@@ -312,7 +312,7 @@ async function promptForDownloadSource(rl, currentSource, { allowBack = false } 
   while (true) {
     const currentLabel = formatDownloadSource(currentSource);
     const backHint = allowBack ? ', or back' : '';
-    const answer = await rl.question(`Download source [${currentLabel}] (favorites/album${backHint}): `);
+    const answer = await rl.question(`Download source [${currentLabel}] (1=favorites, 2=album${backHint}): `);
     if (allowBack && isBackCommand(answer)) {
       return BACK;
     }
@@ -327,7 +327,7 @@ async function promptForDownloadMode(rl, currentMode, { allowBack = false } = {}
   while (true) {
     const currentLabel = formatDownloadMode(currentMode);
     const backHint = allowBack ? ', or back' : '';
-    const answer = await rl.question(`Download mode [${currentLabel}] (raw/original/both${backHint}): `);
+    const answer = await rl.question(`Download mode [${currentLabel}] (1=raw, 2=original, 3=both${backHint}): `);
     if (allowBack && isBackCommand(answer)) {
       return BACK;
     }
