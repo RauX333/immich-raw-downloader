@@ -15,10 +15,12 @@ import {
 } from './planner.js';
 import { ProgressReporter } from './progress.js';
 import { chooseRunConfig, confirmDownloadPlan } from './prompts.js';
+import { styleForStream } from './terminalStyle.js';
 
 export async function runCli(argv = process.argv.slice(2)) {
   loadDotenv();
   const options = parseArgs(argv);
+  const style = styleForStream(process.stdout);
 
   if (options.help) {
     console.log(helpText());
@@ -33,6 +35,8 @@ export async function runCli(argv = process.argv.slice(2)) {
     downloadSource: config.downloadSource,
     albumId: config.albumId,
     downloadMode: config.downloadMode,
+    profileName: config.profileName,
+    profiles: config.profiles,
     allowDestinationChange: !options.destination,
     listAlbums: async ({ immichUrl, apiKey }) => {
       const settingsClient = new ImmichClient({
@@ -51,6 +55,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     downloadSource: runConfig.downloadSource,
     albumId: runConfig.albumId,
     downloadMode: runConfig.downloadMode,
+    profileName: runConfig.profileName,
   });
   const client = new ImmichClient({
     baseUrl: runConfig.immichUrl,
@@ -59,11 +64,12 @@ export async function runCli(argv = process.argv.slice(2)) {
     downloadIdleTimeoutMs: config.downloadIdleTimeoutMs,
   });
 
-  console.log(`immich url: ${runConfig.immichUrl}`);
-  console.log(`download destination: ${runConfig.destination}`);
-  console.log(`download source: ${runConfig.downloadSource === 'album' ? 'Immich album' : 'favorite images'}`);
-  console.log(`download mode: ${formatRunDownloadMode(runConfig.downloadMode)}`);
-  console.log('Planning download...');
+  console.log(`${style.label('Immich URL:')} ${style.value(runConfig.immichUrl)}`);
+  console.log(`${style.label('Download destination:')} ${style.value(runConfig.destination)}`);
+  console.log(`${style.label('Download source:')} ${style.value(runConfig.downloadSource === 'album' ? 'Immich album' : 'favorite images')}`);
+  console.log(`${style.label('Download mode:')} ${style.value(formatRunDownloadMode(runConfig.downloadMode))}`);
+  console.log(`${style.label('Profile:')} ${style.profile(runConfig.profileName)}`);
+  console.log(style.muted('Planning download...'));
   const plan = await planDownloads({
     client,
     destination: runConfig.destination,
@@ -72,7 +78,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     albumId: runConfig.albumId,
     downloadMode: runConfig.downloadMode,
   });
-  console.log(formatDownloadPlan(plan));
+  console.log(formatDownloadPlan(plan, { style }));
 
   let summary;
   if (options.dryRun) {
@@ -87,7 +93,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   } else {
     const confirmed = await confirmDownloadPlan();
     if (!confirmed) {
-      console.log('Download cancelled.');
+      console.log(style.warning('Download cancelled.'));
       return;
     }
 
@@ -100,7 +106,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     });
   }
 
-  console.log(formatSummary(summary, { dryRun: options.dryRun }));
+  console.log(formatSummary(summary, { dryRun: options.dryRun, style }));
 
   if (summary.failures.length > 0) {
     process.exitCode = 1;

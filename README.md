@@ -51,15 +51,29 @@ DOWNLOAD_DESTINATION=/path/to/download-folder
 IMMICH_DOWNLOAD_SOURCE=favorites
 IMMICH_ALBUM_ID=
 IMMICH_DOWNLOAD_MODE=raw
+IMMICH_PROFILE_NAME=default
 IMMICH_DOWNLOAD_MAX_ATTEMPTS=3
 IMMICH_REQUEST_TIMEOUT_SECONDS=30
 IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS=120
 ```
 
+The default top-level download settings are the `default` profile. You can add named profiles in `.env` too:
+
+```sh
+IMMICH_PROFILE_NAME=trip
+IMMICH_PROFILE_TRIP_DOWNLOAD_DESTINATION=/path/to/trip-downloads
+IMMICH_PROFILE_TRIP_DOWNLOAD_SOURCE=album
+IMMICH_PROFILE_TRIP_ALBUM_ID=your-album-id
+IMMICH_PROFILE_TRIP_DOWNLOAD_MODE=both
+```
+
+Use `IMMICH_PROFILE_<NAME>_...` for named profile settings. Profile names in env keys use uppercase letters, numbers, and underscores; the matching `IMMICH_PROFILE_NAME` can be lowercase with dashes, for example `trip`.
+
 When settings are already present, the tool shows them before planning:
 
 ```text
 Current settings
+  Active profile: default
   Immich URL: http://immich.example.local:2283
   Immich API key: abcd...wxyz
   Download destination: /path/to/download-folder
@@ -69,7 +83,9 @@ Current settings
 Press Enter to continue planning, or type anything to edit settings:
 ```
 
-Press Return once to keep the settings and start planning. Type anything else, then press Return, to open the settings menu before planning. From there, choose a setting by number, or press Return when done. Type `back` inside any setting prompt to return to the settings menu without changing that value. The API key is masked on screen. If you choose `album`, the tool loads your Immich albums and lets you pick one by number. If you choose `original` mode, the tool downloads selected images directly and skips RAW matching. If you choose `both` mode, the tool downloads the selected image and its RAW match when one exists. Your selected settings are saved to `.env` and become the default for the next run.
+Press Return once to keep the settings and start planning. Type anything else, then press Return, to open the settings menu before planning. From there, choose a setting by number, or press Return when done. Type `back` inside any setting prompt to return to the settings menu without changing that value. The API key is masked on screen. If you choose `album`, the tool loads your Immich albums and lets you pick one by number. If you choose `original` mode, the tool downloads selected images directly and skips RAW matching. If you choose `both` mode, the tool downloads the selected image and its RAW match when one exists.
+
+In the settings menu, Immich URL and API key are shown first because they are connection settings. Then the menu shows the active profile, a `Switch profile` setting, and the settings owned by that profile: download destination, download source, album ID when needed, and download mode. The switch profile screen lists available profiles and includes `Create profile from current settings`. The tool saves the last used profile to `.env` and opens that profile the next time it starts.
 
 ## Download Flow
 

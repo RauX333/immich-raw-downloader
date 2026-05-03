@@ -1,4 +1,5 @@
 import { Transform } from 'node:stream';
+import { plainStyle, styleForStream } from './terminalStyle.js';
 
 export class ProgressReporter {
   constructor({
@@ -10,6 +11,7 @@ export class ProgressReporter {
     this.now = now;
     this.minIntervalMs = minIntervalMs;
     this.isTTY = Boolean(stream.isTTY);
+    this.style = styleForStream(stream);
     this.lastLineLength = 0;
     this.current = null;
   }
@@ -46,6 +48,7 @@ export class ProgressReporter {
       ...this.current,
       elapsedMs: Math.max(1, this.now() - this.current.startedAt),
       prefix: 'Finished',
+      style: this.style,
     });
     this.#writeLine(line, true);
     this.current = null;
@@ -56,7 +59,7 @@ export class ProgressReporter {
       return;
     }
 
-    const line = `Failed      ${this.current.filename}  ${this.current.index}/${this.current.total}  ${message}`;
+    const line = `${this.style.error('Failed'.padEnd(11))} ${this.current.filename}  ${this.current.index}/${this.current.total}  ${message}`;
     this.#writeLine(line, true);
     this.current = null;
   }
@@ -76,6 +79,7 @@ export class ProgressReporter {
       ...this.current,
       elapsedMs: Math.max(1, now - this.current.startedAt),
       prefix: 'Downloading',
+      style: this.style,
     });
     this.#writeLine(line, false);
   }
@@ -118,13 +122,14 @@ export function formatProgressLine({
   downloadedBytes,
   totalBytes,
   elapsedMs,
+  style = plainStyle,
 }) {
   const totalPart = totalBytes === null || totalBytes === undefined
     ? `${formatBytes(downloadedBytes)} / unknown`
     : `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`;
   const speed = formatSpeed(downloadedBytes, elapsedMs);
 
-  return `${prefix.padEnd(11)} ${filename}  ${index}/${total}  ${totalPart}  ${speed}`;
+  return `${style.accent(prefix.padEnd(11))} ${filename}  ${style.muted(`${index}/${total}`)}  ${style.value(totalPart)}  ${style.accent(speed)}`;
 }
 
 export function formatBytes(bytes) {

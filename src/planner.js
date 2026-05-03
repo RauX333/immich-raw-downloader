@@ -23,6 +23,7 @@ import {
 } from './assetUtils.js';
 import { buildConflictFilename, pathExists, prepareDownloadPath } from './fileUtils.js';
 import { createProgressStream, formatBytes } from './progress.js';
+import { plainStyle } from './terminalStyle.js';
 
 const TWO_MINUTES_MS = 2 * 60 * 1000;
 const DEFAULT_RETRY_BACKOFF_MS = 500;
@@ -406,20 +407,25 @@ export function planToSummary(plan) {
   };
 }
 
-export function formatDownloadPlan(plan) {
+export function formatDownloadPlan(plan, { style = plainStyle } = {}) {
   return [
     '',
-    'Download plan',
-    `  Source: ${plan.sourceLabel || formatSourceLabel(plan.downloadSource)}`,
-    `  Mode: ${plan.modeLabel || formatModeLabel(plan.downloadMode)}`,
-    `  ${formatScannedLabel(plan)}: ${plan.imagesScanned ?? plan.favoritesScanned}`,
-    `  Files to download: ${plan.plannedDownloads.length}`,
-    `  Estimated size: ${formatPlanSize(plan)}`,
-    `  RAW matches: ${plan.rawMatches}`,
-    `  Original images: ${plan.originalDownloads || 0}`,
-    `  Fallback originals: ${plan.fallbackOriginals}`,
-    `  Skipped existing: ${plan.skippedExisting}`,
-    `  Preflight failures: ${plan.failures.length}`,
+    style.heading('Download plan'),
+    formatPlanLine('Source', plan.sourceLabel || formatSourceLabel(plan.downloadSource), style),
+    formatPlanLine('Mode', plan.modeLabel || formatModeLabel(plan.downloadMode), style),
+    formatPlanLine(formatScannedLabel(plan), plan.imagesScanned ?? plan.favoritesScanned, style),
+    formatPlanLine('Files to download', plan.plannedDownloads.length, style),
+    formatPlanLine('Estimated size', formatPlanSize(plan), style),
+    formatPlanLine('RAW matches', plan.rawMatches, style),
+    formatPlanLine('Original images', plan.originalDownloads || 0, style),
+    formatPlanLine('Fallback originals', plan.fallbackOriginals, style),
+    formatPlanLine('Skipped existing', plan.skippedExisting, style),
+    formatPlanLine(
+      'Preflight failures',
+      plan.failures.length,
+      style,
+      { warning: plan.failures.length > 0 },
+    ),
   ].join('\n');
 }
 
@@ -432,30 +438,40 @@ export function formatPlanSize(plan) {
   return `${knownSize} + ${plan.unknownSizeFiles} unknown-size file${plan.unknownSizeFiles === 1 ? '' : 's'}`;
 }
 
-export function formatSummary(summary, { dryRun = false } = {}) {
+export function formatSummary(summary, { dryRun = false, style = plainStyle } = {}) {
   const lines = [
     '',
-    'Summary',
-    `  ${formatScannedLabel(summary)}: ${summary.imagesScanned ?? summary.favoritesScanned}`,
-    `  RAW matches: ${summary.rawMatches}`,
-    `  Original images: ${summary.originalDownloads || 0}`,
-    `  Fallback originals: ${summary.fallbackOriginals}`,
-    `  Skipped existing: ${summary.skippedExisting}`,
+    style.heading('Summary'),
+    formatPlanLine(formatScannedLabel(summary), summary.imagesScanned ?? summary.favoritesScanned, style),
+    formatPlanLine('RAW matches', summary.rawMatches, style),
+    formatPlanLine('Original images', summary.originalDownloads || 0, style),
+    formatPlanLine('Fallback originals', summary.fallbackOriginals, style),
+    formatPlanLine('Skipped existing', summary.skippedExisting, style),
   ];
 
   if (dryRun) {
-    lines.push(`  Planned downloads: ${summary.dryRunPlanned}`);
+    lines.push(formatPlanLine('Planned downloads', summary.dryRunPlanned, style));
   } else {
-    lines.push(`  Downloaded: ${summary.downloaded}`);
+    lines.push(formatPlanLine('Downloaded', summary.downloaded, style));
   }
 
-  lines.push(`  Failures: ${summary.failures.length}`);
+  lines.push(formatPlanLine(
+    'Failures',
+    summary.failures.length,
+    style,
+    { warning: summary.failures.length > 0 },
+  ));
 
   for (const failure of summary.failures) {
-    lines.push(`    - ${failure.filename} (${failure.assetId}): ${failure.message}`);
+    lines.push(`    - ${style.error(failure.filename)} ${style.muted(`(${failure.assetId})`)}: ${failure.message}`);
   }
 
   return lines.join('\n');
+}
+
+function formatPlanLine(label, value, style, { warning = false } = {}) {
+  const formatValue = warning ? style.warning : style.value;
+  return `  ${style.label(`${label}:`)} ${formatValue(String(value))}`;
 }
 
 async function listSourceImages(client, { downloadSource, albumId }) {

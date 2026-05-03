@@ -12,6 +12,7 @@ export const DEFAULT_DOWNLOAD_MODE = DOWNLOAD_MODE_RAW;
 export const DEFAULT_DOWNLOAD_MAX_ATTEMPTS = 3;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
+export const DEFAULT_PROFILE_NAME = 'default';
 
 export function loadDotenv(filePath = path.resolve(process.cwd(), '.env')) {
   if (!fs.existsSync(filePath)) {
@@ -89,10 +90,14 @@ export function parseArgs(argv) {
 export function readConfigFromEnv(env = process.env) {
   const immichUrl = env.IMMICH_URL || null;
   const apiKey = env.IMMICH_API_KEY || null;
-  const downloadDestination = env.DOWNLOAD_DESTINATION || null;
-  const downloadSource = normalizeDownloadSource(env.IMMICH_DOWNLOAD_SOURCE);
-  const albumId = env.IMMICH_ALBUM_ID || null;
-  const downloadMode = normalizeDownloadMode(env.IMMICH_DOWNLOAD_MODE);
+  const profileName = normalizeProfileName(env.IMMICH_PROFILE_NAME);
+  const profiles = readProfilesFromEnv(env);
+  const activeProfile = findProfile(profiles, profileName)
+    || findProfile(profiles, DEFAULT_PROFILE_NAME);
+  const downloadDestination = activeProfile?.downloadDestination || null;
+  const downloadSource = normalizeDownloadSource(activeProfile?.downloadSource);
+  const albumId = activeProfile?.albumId || null;
+  const downloadMode = normalizeDownloadMode(activeProfile?.downloadMode);
   const downloadMaxAttempts = parsePositiveInteger(
     env.IMMICH_DOWNLOAD_MAX_ATTEMPTS,
     DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
@@ -113,10 +118,112 @@ export function readConfigFromEnv(env = process.env) {
     downloadSource,
     albumId,
     downloadMode,
+    profileName: activeProfile?.name || DEFAULT_PROFILE_NAME,
+    profiles,
     downloadMaxAttempts,
     requestTimeoutMs,
     downloadIdleTimeoutMs,
   };
+}
+
+function readProfilesFromEnv(env) {
+  const profiles = new Map();
+  const defaultProfile = {
+    name: DEFAULT_PROFILE_NAME,
+    downloadDestination: env.DOWNLOAD_DESTINATION || null,
+    downloadSource: normalizeDownloadSource(env.IMMICH_DOWNLOAD_SOURCE),
+    albumId: env.IMMICH_ALBUM_ID || null,
+    downloadMode: normalizeDownloadMode(env.IMMICH_DOWNLOAD_MODE),
+  };
+  profiles.set(profileKey(defaultProfile.name), defaultProfile);
+
+  const profilePattern = /^IMMICH_PROFILE_([A-Z0-9_]+)_(DOWNLOAD_DESTINATION|DOWNLOAD_SOURCE|ALBUM_ID|DOWNLOAD_MODE)$/;
+  for (const [key, value] of Object.entries(env)) {
+    const match = key.match(profilePattern);
+    if (!match) {
+      continue;
+    }
+
+    const name = envTokenToProfileName(match[1]);
+    const field = match[2];
+    const mapKey = profileKey(name);
+    const profile = profiles.get(mapKey) || {
+      name,
+      downloadDestination: null,
+      downloadSource: DEFAULT_DOWNLOAD_SOURCE,
+      albumId: null,
+      downloadMode: DEFAULT_DOWNLOAD_MODE,
+    };
+
+    if (field === 'DOWNLOAD_DESTINATION') {
+      profile.downloadDestination = value || null;
+    } else if (field === 'DOWNLOAD_SOURCE') {
+      profile.downloadSource = normalizeDownloadSource(value);
+    } else if (field === 'ALBUM_ID') {
+      profile.albumId = value || null;
+    } else if (field === 'DOWNLOAD_MODE') {
+      profile.downloadMode = normalizeDownloadMode(value);
+    }
+
+    profiles.set(mapKey, profile);
+  }
+
+  readLegacyScopedProfilesFromEnv(env, profiles);
+
+  return Array.from(profiles.values()).sort(compareProfiles);
+}
+
+function readLegacyScopedProfilesFromEnv(env, profiles) {
+  const legacyPattern = /^IMMICH_(DEFAULT|GLOBAL|PROJECT)_PROFILE_([A-Z0-9_]+)_(DOWNLOAD_DESTINATION|DOWNLOAD_SOURCE|ALBUM_ID|DOWNLOAD_MODE)$/;
+  for (const [key, value] of Object.entries(env)) {
+    const match = key.match(legacyPattern);
+    if (!match) {
+      continue;
+    }
+
+    const name = envTokenToProfileName(match[2]);
+    const field = match[3];
+    const mapKey = profileKey(name);
+    const profile = profiles.get(mapKey) || {
+      name,
+      downloadDestination: null,
+      downloadSource: DEFAULT_DOWNLOAD_SOURCE,
+      albumId: null,
+      downloadMode: DEFAULT_DOWNLOAD_MODE,
+    };
+
+    if (field === 'DOWNLOAD_DESTINATION') {
+      profile.downloadDestination = value || null;
+    } else if (field === 'DOWNLOAD_SOURCE') {
+      profile.downloadSource = normalizeDownloadSource(value);
+    } else if (field === 'ALBUM_ID') {
+      profile.albumId = value || null;
+    } else if (field === 'DOWNLOAD_MODE') {
+      profile.downloadMode = normalizeDownloadMode(value);
+    }
+
+    profiles.set(mapKey, profile);
+  }
+}
+
+function findProfile(profiles, name) {
+  return profiles.find((profile) => {
+    return profile.name === normalizeProfileName(name);
+  });
+}
+
+function profileKey(name) {
+  return normalizeProfileName(name);
+}
+
+function compareProfiles(left, right) {
+  if (left.name === DEFAULT_PROFILE_NAME) {
+    return -1;
+  }
+  if (right.name === DEFAULT_PROFILE_NAME) {
+    return 1;
+  }
+  return left.name.localeCompare(right.name);
 }
 
 export function normalizeDownloadSource(value) {
@@ -140,14 +247,22 @@ export function normalizeDownloadMode(value) {
   return DOWNLOAD_MODE_RAW;
 }
 
+export function normalizeProfileName(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || DEFAULT_PROFILE_NAME;
+}
+
 export async function saveConfigToEnv(config, filePath = path.resolve(process.cwd(), '.env')) {
+  const profileName = normalizeProfileName(config.profileName);
   const updates = {
     IMMICH_URL: config.immichUrl,
     IMMICH_API_KEY: config.apiKey,
-    DOWNLOAD_DESTINATION: config.downloadDestination,
-    IMMICH_DOWNLOAD_SOURCE: normalizeDownloadSource(config.downloadSource),
-    IMMICH_ALBUM_ID: config.albumId,
-    IMMICH_DOWNLOAD_MODE: normalizeDownloadMode(config.downloadMode),
+    IMMICH_PROFILE_NAME: profileName,
+    ...profileUpdatesForConfig(config, profileName),
   };
 
   const existing = await readEnvFileLines(filePath);
@@ -175,6 +290,39 @@ export async function saveConfigToEnv(config, filePath = path.resolve(process.cw
   }
 
   await fsPromises.writeFile(filePath, `${nextLines.join('\n').replace(/\n*$/g, '')}\n`, 'utf8');
+}
+
+function profileUpdatesForConfig(config, name) {
+  const profileValues = {
+    DOWNLOAD_DESTINATION: config.downloadDestination,
+    IMMICH_DOWNLOAD_SOURCE: normalizeDownloadSource(config.downloadSource),
+    IMMICH_ALBUM_ID: config.albumId,
+    IMMICH_DOWNLOAD_MODE: normalizeDownloadMode(config.downloadMode),
+  };
+
+  if (name === DEFAULT_PROFILE_NAME) {
+    return profileValues;
+  }
+
+  const prefix = profileEnvPrefix(name);
+  return {
+    [`${prefix}_DOWNLOAD_DESTINATION`]: profileValues.DOWNLOAD_DESTINATION,
+    [`${prefix}_DOWNLOAD_SOURCE`]: profileValues.IMMICH_DOWNLOAD_SOURCE,
+    [`${prefix}_ALBUM_ID`]: profileValues.IMMICH_ALBUM_ID,
+    [`${prefix}_DOWNLOAD_MODE`]: profileValues.IMMICH_DOWNLOAD_MODE,
+  };
+}
+
+function profileEnvPrefix(name) {
+  return `IMMICH_PROFILE_${profileNameToEnvToken(name)}`;
+}
+
+function profileNameToEnvToken(name) {
+  return normalizeProfileName(name).replace(/-/g, '_').toUpperCase();
+}
+
+function envTokenToProfileName(token) {
+  return normalizeProfileName(String(token || '').replace(/_/g, '-'));
 }
 
 async function readEnvFileLines(filePath) {
@@ -241,6 +389,13 @@ Environment:
   IMMICH_ALBUM_ID  Album ID or album URL to use when IMMICH_DOWNLOAD_SOURCE=album
   IMMICH_DOWNLOAD_MODE
                    Optional download mode: raw, original, or both
+  IMMICH_PROFILE_NAME
+                   Optional last-used profile name, default default
+  IMMICH_PROFILE_<NAME>_DOWNLOAD_DESTINATION
+  IMMICH_PROFILE_<NAME>_DOWNLOAD_SOURCE
+  IMMICH_PROFILE_<NAME>_ALBUM_ID
+  IMMICH_PROFILE_<NAME>_DOWNLOAD_MODE
+                   Optional named profile settings
   IMMICH_DOWNLOAD_MAX_ATTEMPTS
                    Optional download retry attempts, default 3
   IMMICH_REQUEST_TIMEOUT_SECONDS

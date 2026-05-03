@@ -98,9 +98,9 @@ How to run:
 2. Double-click:
    ${launcher}
 
-The launcher opens or uses a terminal window. If .env is missing or incomplete, enter IMMICH_URL, IMMICH_API_KEY, and the download destination when prompted. In the settings menu, you can keep the default favorite-image source or choose an Immich album from a numbered album list. You can also choose RAW, original-image, or both download mode. Type back inside a setting prompt to return to the settings menu.
+The launcher opens or uses a terminal window. If .env is missing or incomplete, enter IMMICH_URL, IMMICH_API_KEY, and the download destination when prompted. In the settings menu, connection settings appear first, then the active profile, switch profile, and profile settings for destination/source/mode. The switch profile screen lists available profiles and lets you create a profile from the current destination, source, and mode. Type back inside a setting prompt to return to the settings menu.
 
-After settings are entered, the launcher saves them to .env, shows the download plan, asks for confirmation, and then downloads files. Files are saved into local-date folders, temporary .part files are cleaned up after failed transfers, and transient download failures are retried automatically.
+After settings are entered, the launcher saves them to .env, remembers the last used profile, shows the download plan, asks for confirmation, and then downloads files. Files are saved into local-date folders, temporary .part files are cleaned up after failed transfers, and transient download failures are retried automatically.
 
 If double-click is blocked by your file manager, open a terminal in this folder and run the launcher from there.
 `;

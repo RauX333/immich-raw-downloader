@@ -21,6 +21,18 @@ function nullOutput() {
   });
 }
 
+function captureOutput() {
+  let text = '';
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      text += chunk.toString();
+      callback();
+    },
+  });
+  stream.text = () => text;
+  return stream;
+}
+
 function feedLines(input, lines) {
   const writeNext = (index) => {
     if (index >= lines.length) {
@@ -33,6 +45,12 @@ function feedLines(input, lines) {
   };
 
   writeNext(0);
+}
+
+function defaultProfileResult() {
+  return {
+    profileName: 'default',
+  };
 }
 
 test('confirmDownloadPlan accepts yes answers', async () => {
@@ -195,6 +213,7 @@ test('chooseRunConfig continues with current settings when user presses enter', 
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultProfileResult(),
   });
 });
 
@@ -211,7 +230,7 @@ test('chooseRunConfig edits settings after non-empty menu input', async () => {
     inputStream: input,
     outputStream: output,
   });
-  feedLines(input, ['e', '1', 'https://new.test', '2', 'new-key', '3', newRoot, '']);
+  feedLines(input, ['e', '1', 'https://new.test', '2', 'new-key', '4', newRoot, '']);
 
   assert.deepEqual(await resultPromise, {
     immichUrl: 'https://new.test',
@@ -220,7 +239,39 @@ test('chooseRunConfig edits settings after non-empty menu input', async () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultProfileResult(),
   });
+});
+
+test('settings menu shows connection settings before profile settings', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-menu-layout-'));
+  const input = new PassThrough();
+  const output = captureOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    inputStream: input,
+    outputStream: output,
+  });
+  feedLines(input, ['e', 'done']);
+  await resultPromise;
+
+  const text = output.text();
+  const urlIndex = text.indexOf('1. Immich URL');
+  const keyIndex = text.indexOf('2. Immich API key');
+  const profileIndex = text.indexOf('Now use profile default');
+  const switchIndex = text.indexOf('3. Switch profile');
+  const scopedIndex = text.indexOf('Profile settings');
+  const destinationIndex = text.indexOf('4. Download destination');
+
+  assert.ok(urlIndex !== -1);
+  assert.ok(urlIndex < keyIndex);
+  assert.ok(keyIndex < profileIndex);
+  assert.ok(profileIndex < switchIndex);
+  assert.ok(switchIndex < scopedIndex);
+  assert.ok(scopedIndex < destinationIndex);
 });
 
 test('chooseRunConfig lets user pick an album from Immich albums', async () => {
@@ -239,7 +290,7 @@ test('chooseRunConfig lets user pick an album from Immich albums', async () => {
       { id: 'album-two', albumName: 'Family', assetCount: 34 },
     ],
   });
-  feedLines(input, ['e', '4', 'album', '2', '']);
+  feedLines(input, ['e', '5', 'album', '2', '']);
 
   assert.deepEqual(await resultPromise, {
     immichUrl: 'http://old.test',
@@ -248,6 +299,7 @@ test('chooseRunConfig lets user pick an album from Immich albums', async () => {
     downloadSource: 'album',
     albumId: 'album-two',
     downloadMode: 'raw',
+    ...defaultProfileResult(),
   });
 });
 
@@ -263,7 +315,7 @@ test('chooseRunConfig lets user choose original image download mode', async () =
     inputStream: input,
     outputStream: output,
   });
-  feedLines(input, ['e', '5', 'original', '']);
+  feedLines(input, ['e', '6', 'original', '']);
 
   assert.deepEqual(await resultPromise, {
     immichUrl: 'http://old.test',
@@ -272,6 +324,7 @@ test('chooseRunConfig lets user choose original image download mode', async () =
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'original',
+    ...defaultProfileResult(),
   });
 });
 
@@ -287,7 +340,7 @@ test('chooseRunConfig lets user choose both download mode', async () => {
     inputStream: input,
     outputStream: output,
   });
-  feedLines(input, ['e', '5', 'both', '']);
+  feedLines(input, ['e', '6', 'both', '']);
 
   assert.deepEqual(await resultPromise, {
     immichUrl: 'http://old.test',
@@ -296,6 +349,74 @@ test('chooseRunConfig lets user choose both download mode', async () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'both',
+    ...defaultProfileResult(),
+  });
+});
+
+test('chooseRunConfig switches to a saved profile', async () => {
+  const defaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-default-profile-'));
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-project-profile-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: defaultRoot,
+    profiles: [
+      {
+        name: 'default',
+        downloadDestination: defaultRoot,
+        downloadSource: 'favorites',
+        albumId: null,
+        downloadMode: 'raw',
+      },
+      {
+        name: 'trip',
+        downloadDestination: projectRoot,
+        downloadSource: 'album',
+        albumId: 'album-trip',
+        downloadMode: 'both',
+      },
+    ],
+    inputStream: input,
+    outputStream: output,
+  });
+  feedLines(input, ['e', '3', '2', '']);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: projectRoot,
+    downloadSource: 'album',
+    albumId: 'album-trip',
+    downloadMode: 'both',
+    profileName: 'trip',
+  });
+});
+
+test('chooseRunConfig creates a profile from current settings', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-run-new-profile-'));
+  const input = new PassThrough();
+  const output = nullOutput();
+
+  const resultPromise = chooseRunConfig({
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    inputStream: input,
+    outputStream: output,
+  });
+  feedLines(input, ['e', '3', 'c', 'Trip 2026', '']);
+
+  assert.deepEqual(await resultPromise, {
+    immichUrl: 'http://old.test',
+    apiKey: 'old-key',
+    destination: root,
+    downloadSource: 'favorites',
+    albumId: null,
+    downloadMode: 'raw',
+    profileName: 'trip-2026',
   });
 });
 
@@ -320,6 +441,7 @@ test('chooseRunConfig can go back from a setting prompt without changing it', as
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultProfileResult(),
   });
 });
 
@@ -338,7 +460,7 @@ test('chooseRunConfig can go back from album selection and keep previous source'
       { id: 'album-one', albumName: 'Trip', assetCount: 12 },
     ],
   });
-  feedLines(input, ['e', '4', 'album', 'back', '']);
+  feedLines(input, ['e', '5', 'album', 'back', '']);
 
   assert.deepEqual(await resultPromise, {
     immichUrl: 'http://old.test',
@@ -347,6 +469,7 @@ test('chooseRunConfig can go back from album selection and keep previous source'
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultProfileResult(),
   });
 });
 
@@ -371,6 +494,7 @@ test('chooseRunConfig asks for destination on enter when none is configured', as
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultProfileResult(),
   });
 });
 
@@ -395,5 +519,6 @@ test('chooseRunConfig prompts for missing first-run settings', async () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    ...defaultProfileResult(),
   });
 });
