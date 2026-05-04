@@ -1,157 +1,194 @@
-# Immich Favorite RAW Downloader
+# Immich RAW Downloader
 
-Download the RAW versions of your favorite Immich images or images from a chosen Immich album. You can also switch the download mode to save the selected images directly, or download both the RAW match and the selected image.
+Search and download matching RAW version of images from Immich for favorite photos or photos in an album.
 
-The app is a dependency-free Node.js command-line tool for macOS, Linux, and Windows. It can be run from a terminal or from the generated clickable launchers.
+## What it does
 
-## What You Need
+- Search and downloads RAW version of images for Immich favorites
+- Search and downloads RAW version of images for a selected Immich album
+- Can download RAW files, original files, or both
+- Can download only new images (skips previously downloaded)
+- Skips files that already exist on disk
+- Supports dry run before downloading
+- Supports named profiles for different download configurations
+- Works on macOS, Windows, and Linux
+
+## How RAW matching works
+
+The tool matches files by:
+
+- Same filename stem
+- Close capture time (within 2 minutes)
+- RAW file extension
+
+Example:
+
+```text
+DSC01234.JPG  ->  DSC01234.ARW
+IMG_1001.HEIC ->  IMG_1001.DNG
+```
+
+Supported RAW extensions include:
+
+```text
+.arw, .cr2, .cr3, .nef, .raf, .rw2, .orf, .dng
+```
+
+If multiple RAW candidates match, the closest capture time wins.
+
+## Requirements
 
 - Node.js 22 or newer
 - Your Immich server URL, for example `http://immich.example.local:2283`
-- An Immich API key with `asset.read`, `asset.download`, and `album.read` permissions
-- An existing folder where downloads should be saved
+- Your Immich API key
 
-## Quick Start
+Your Immich API key needs those permissions:
 
-Run the tool:
+- `asset.read`
+- `asset.download`
+- `album.read`
 
-```sh
+The download folder must already exist.
+
+## Download
+
+Download the latest release from GitHub Releases:
+
+https://github.com/RauX333/immich-raw-downloader/releases
+
+Choose the package for your system:
+
+- macOS
+- Windows
+- Linux
+
+Extract the downloaded file.
+
+## Run
+
+Open the extracted folder and run the launcher:
+
+```text
+macOS:   Run Immich RAW Downloader.command
+Windows: Run Immich RAW Downloader.cmd
+Linux:   run-immich-raw-downloader.sh
+```
+
+Or run from source:
+
+```bash
 npm start
 ```
 
-If settings are missing, enter them in the terminal:
+On first run, enter:
 
 ```text
-Current settings
-  Immich URL: not set
-  Immich API key: not set
-  Download destination: not set
-  Download source: favorites
-  Download mode: raw
-
-Immich URL: http://immich.example.local:2283
-Immich API key: your-api-key
-Download destination: /path/to/download-folder
+Immich URL
+Immich API key
+Download destination
 ```
 
-After you enter the required settings, the tool creates a local `.env` file automatically and uses those saved values the next time it runs.
+Example:
 
-You can also create or edit `.env` yourself if you want to prefill settings before launching the tool:
+```text
+Immich URL: http://immich.example.local:2283
+Immich API key: your-api-key
+Download destination: /Users/you/Pictures/RAW
+```
+
+
+## Configuration
+Edit settings in cli interface.
+
+Or edit `.env` yourself:
 
 ```sh
 cp .env.example .env
 ```
 
-Edit `.env`:
+## Download sources
 
-```sh
-IMMICH_URL=http://immich.example.local:2283
-IMMICH_API_KEY=your-api-key
-DOWNLOAD_DESTINATION=/path/to/download-folder
-IMMICH_DOWNLOAD_SOURCE=favorites
-IMMICH_ALBUM_ID=
-IMMICH_DOWNLOAD_MODE=raw
-IMMICH_PROFILE_NAME=default
-IMMICH_DOWNLOAD_MAX_ATTEMPTS=3
-IMMICH_REQUEST_TIMEOUT_SECONDS=30
-IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS=120
-```
+### Favorites
 
-The default top-level download settings are the `default` profile. You can add named profiles in `.env` too:
+Download files based on your Immich favorite photos.
 
-```sh
-IMMICH_PROFILE_NAME=trip
-IMMICH_PROFILE_TRIP_DOWNLOAD_DESTINATION=/path/to/trip-downloads
-IMMICH_PROFILE_TRIP_DOWNLOAD_SOURCE=album
-IMMICH_PROFILE_TRIP_ALBUM_ID=your-album-id
-IMMICH_PROFILE_TRIP_DOWNLOAD_MODE=both
-```
 
-Use `IMMICH_PROFILE_<NAME>_...` for named profile settings. Profile names in env keys use uppercase letters, numbers, and underscores; the matching `IMMICH_PROFILE_NAME` can be lowercase with dashes, for example `trip`.
+### Album
 
-When settings are already present, the tool shows them before planning:
+Download files based on a specific Immich album.
 
-```text
-Current settings
-  Active profile: default
-  Immich URL: http://immich.example.local:2283
-  Immich API key: abcd...wxyz
-  Download destination: /path/to/download-folder
-  Download source: favorites
-  Download mode: raw
+You can also select an album from the interactive menu.
 
-Press Enter to continue planning, or type anything to edit settings:
-```
+## Download modes
 
-Press Return once to keep the settings and start planning. Type anything else, then press Return, to open the settings menu before planning. From there, choose a setting by number, or press Return when done. Type `back` inside any setting prompt to return to the settings menu without changing that value. The API key is masked on screen. If you choose `album`, the tool loads your Immich albums and lets you pick one by number. If you choose `original` mode, the tool downloads selected images directly and skips RAW matching. If you choose `both` mode, the tool downloads the selected image and its RAW match when one exists.
+### RAW only
 
-In the settings menu, Immich URL and API key are shown first because they are connection settings. Then the menu shows the active profile, a `Switch profile` setting, and the settings owned by that profile: download destination, download source, album ID when needed, and download mode. The switch profile screen lists available profiles and includes `Create profile from current settings`. The tool saves the last used profile to `.env` and opens that profile the next time it starts.
+Downloads matching RAW files. If no RAW match is found, the original selected image is downloaded as a fallback.
 
-## Download Flow
+### Original only
 
-After the prompts, the tool scans Immich and shows a plan before downloading:
+Downloads the selected Immich image itself.
+
+### Both
+
+Downloads both the selected image and the matching RAW file when available.
+
+## Download only new images
+
+When enabled, the tool skips images that were already downloaded before. It tracks downloads in a local SQLite database (`download-history.db`). This is useful when you run the tool regularly and only want to pull newly favorited photos or newly added album photos, even if you edited or moved the local alreay downloaded files.
+
+
+
+## Output folder
+
+Files are saved into date-based folders using the computer's local timezone:
 
 ```text
-download destination: /path/to/download-folder
-Planning download...
-
-Download plan
-  Source: favorite images
-  Mode: RAW versions
-  Favorites scanned: 135
-  Files to download: 123
-  Estimated size: 6.00 GB
-  RAW matches: 118
-  Original images: 0
-  Fallback originals: 5
-  Skipped existing: 12
-  Preflight failures: 0
-Start download? [y/N]
+DOWNLOAD_DESTINATION/
+  2026-05-01/
+    DSC01234.ARW
+    DSC01235.ARW
+  2026-05-02/
+    DSC01320.ARW
 ```
 
-Type `y` or `yes` to start. Any other answer cancels without downloading.
-
-During downloads, progress is shown per file:
-
-```text
-Downloading DSC01234.ARW  111/324  25.0 MB / 100.0 MB  25.0 MB/s
-```
-
-Files are saved into `YYYY-MM-DD` subfolders using the computer's local timezone. Existing files are skipped. Downloads are written to temporary `.part` files first, then renamed after they finish, so interrupted transfers do not look complete.
-
-## Useful Commands
+## Command-line options
 
 Preview what would be downloaded without writing files:
 
-```sh
+```bash
 npm start -- --dry-run
 ```
 
 Show detailed matching decisions:
 
-```sh
+```bash
 npm start -- --verbose
 ```
 
 Use a destination folder for one run:
 
-```sh
+```bash
 npm start -- --dest /path/to/downloads
 ```
 
-When `--dest` is used, the settings menu still lets you edit the Immich URL and API key, but the destination stays fixed for that run.
+Show help:
 
-On Windows:
+```bash
+npm start -- --help
+```
+
+Windows example:
 
 ```bat
 npm start -- --dest C:\Users\you\Pictures\ImmichRaw
 ```
 
-## Clickable Launchers
+## Build
 
 To create portable platform folders, run:
 
-```sh
+```bash
 npm run build:bundles
 ```
 
@@ -161,33 +198,27 @@ Then run the script for your platform:
 - `dist/immich-raw-downloader-linux/run-immich-raw-downloader.sh`
 - `dist/immich-raw-downloader-windows/Run Immich RAW Downloader.cmd`
 
-Each folder contains the app, a launcher, `README-FIRST.txt`, and a copy of `.env` if one exists. Copy the correct folder to the target computer, make sure Node.js 22 or newer is installed there, then double-click the launcher. If there is no `.env`, the launcher asks for the missing settings in the terminal.
+Each folder contains the app, a launcher, `README-FIRST.txt`, and a copy of `.env` if one exists.
 
-If double-click is blocked by the OS or file manager, open a terminal in that bundle folder and run the launcher manually.
+## Development
 
-## How RAW Matching Works
+Run from source:
 
-- The tool loads Immich image assets marked as favorite by default.
-- If `IMMICH_DOWNLOAD_SOURCE=album`, the tool loads images from the selected `IMMICH_ALBUM_ID` instead.
-- If `IMMICH_DOWNLOAD_MODE=raw`, for each selected image, it searches nearby image assets taken within 2 minutes.
-- If `IMMICH_DOWNLOAD_MODE=original`, it downloads the selected image itself and does not search for RAW candidates.
-- If `IMMICH_DOWNLOAD_MODE=both`, it downloads the selected image itself and also downloads the matching RAW asset when one exists.
-- A RAW candidate must have the same filename stem, such as `DSC01234.JPG` and `DSC01234.ARW`.
-- Common RAW formats are recognized, including `.arw`, `.cr2`, `.cr3`, `.nef`, `.raf`, `.rw2`, `.orf`, `.dng`, and others.
-- If multiple RAW candidates match, the closest capture time wins.
-- If no RAW match exists, the selected image itself is downloaded.
+```bash
+git clone https://github.com/RauX333/immich-raw-downloader.git
+cd immich-raw-downloader
+npm install
+npm start
+```
 
-## Notes
+Run tests:
 
-- The download destination folder must already exist.
-- The tool does not delete or overwrite existing files.
-- If two planned files would use the same folder and filename, the later file gets a short asset-id suffix before its extension.
-- Downloads retry transient failures automatically. Advanced `.env` settings can tune `IMMICH_DOWNLOAD_MAX_ATTEMPTS`, `IMMICH_REQUEST_TIMEOUT_SECONDS`, and `IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS`.
-- `.env` is ignored by git because it may contain your API key.
-- Generated `dist/` bundles are ignored by git because they may contain a copied `.env`.
-
-## Tests
-
-```sh
+```bash
 npm test
+```
+
+Build release folders:
+
+```bash
+npm run build:bundles
 ```
