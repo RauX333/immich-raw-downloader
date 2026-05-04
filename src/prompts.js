@@ -11,7 +11,9 @@ import {
   DOWNLOAD_SOURCE_ALBUM,
   DOWNLOAD_SOURCE_FAVORITES,
   normalizeDownloadMode,
+  normalizeDownloadOnlyNew,
   normalizeDownloadSource,
+  normalizeLogLevel,
   normalizeProfileName,
 } from './config.js';
 import { ensureExistingDirectory } from './fileUtils.js';
@@ -26,10 +28,15 @@ export async function chooseRunConfig({
   downloadSource = DEFAULT_DOWNLOAD_SOURCE,
   albumId = null,
   downloadMode = DEFAULT_DOWNLOAD_MODE,
+  downloadOnlyNew = false,
+  profileId = null,
   profileName = DEFAULT_PROFILE_NAME,
   profiles = [],
+  logLevel = 'warn',
   allowDestinationChange = true,
   listAlbums = null,
+  clearHistoryFn = null,
+  onLogLevelChange = null,
   inputStream = input,
   outputStream = output,
 } = {}) {
@@ -40,7 +47,10 @@ export async function chooseRunConfig({
     downloadSource: normalizeDownloadSource(downloadSource),
     albumId: normalizeAlbumIdInput(albumId),
     downloadMode: normalizeDownloadMode(downloadMode),
+    downloadOnlyNew: normalizeDownloadOnlyNew(downloadOnlyNew),
+    profileId: profileId || null,
     profileName: normalizeProfileName(profileName),
+    logLevel: normalizeLogLevel(logLevel),
   };
   const availableProfiles = normalizeProfiles(profiles, current);
 
@@ -78,6 +88,8 @@ export async function chooseRunConfig({
       profiles: availableProfiles,
       allowDestinationChange,
       listAlbums,
+      clearHistoryFn,
+      onLogLevelChange,
     });
     await promptForMissingRunConfig(
       rl,
@@ -100,6 +112,8 @@ async function editRunConfigMenu({
   profiles,
   allowDestinationChange,
   listAlbums,
+  clearHistoryFn,
+  onLogLevelChange,
 }) {
   while (true) {
     const style = styleForStream(outputStream);
@@ -121,13 +135,39 @@ async function editRunConfigMenu({
       if (value !== BACK) {
         current.apiKey = value;
       }
-    } else if (['3', 'profile', 'profiles', 'switch profile'].includes(selected)) {
-      const profile = await promptForProfileSwitch(rl, outputStream, current, profiles);
-      if (profile !== BACK) {
-        upsertProfile(profiles, profile);
-        applyProfileToCurrent(profile, current, { allowDestinationChange });
+    } else if (['3', 'log', 'log level', 'level'].includes(selected)) {
+      const value = await promptForLogLevel(rl, current.logLevel, { allowBack: true });
+      if (value !== BACK) {
+        current.logLevel = value;
+        if (onLogLevelChange) {
+          onLogLevelChange(value);
+        }
       }
-    } else if (['4', 'destination', 'dest'].includes(selected)) {
+    } else if (['4', 'profile', 'profiles', 'switch profile'].includes(selected)) {
+      const result = await promptForProfileSwitch(rl, outputStream, current, profiles);
+      if (result?.action === 'delete' && result.profile) {
+        const deleted = await promptForDeleteProfile(rl, outputStream, result.profile);
+        if (deleted) {
+          const index = profiles.findIndex((p) => p.name === result.profile.name);
+          if (index !== -1) {
+            profiles.splice(index, 1);
+          }
+          if (clearHistoryFn && result.profile.profileId) {
+            try {
+              await clearHistoryFn(result.profile.profileId);
+              outputStream.write(`${style.value('Profile deleted and download history cleared.')}\n`);
+            } catch {
+              outputStream.write(`${style.warning('Profile deleted but could not clear download history.')}\n`);
+            }
+          } else {
+            outputStream.write(`${style.value('Profile deleted.')}\n`);
+          }
+        }
+      } else if (result !== BACK) {
+        upsertProfile(profiles, result);
+        applyProfileToCurrent(result, current, { allowDestinationChange });
+      }
+    } else if (['5', 'destination', 'dest'].includes(selected)) {
       if (!allowDestinationChange) {
         outputStream.write(`${style.warning('Download destination is fixed for this run because --dest was used.')}\n`);
         continue;
@@ -141,7 +181,7 @@ async function editRunConfigMenu({
       if (value !== BACK) {
         current.destination = value;
       }
-    } else if (['5', 'source', 'download source'].includes(selected)) {
+    } else if (['6', 'source', 'download source'].includes(selected)) {
       const previousSource = current.downloadSource;
       const previousAlbumId = current.albumId;
       const source = await promptForDownloadSource(rl, current.downloadSource, { allowBack: true });
@@ -160,10 +200,29 @@ async function editRunConfigMenu({
         }
         current.albumId = albumId;
       }
-    } else if (['6', 'mode', 'download mode'].includes(selected)) {
+    } else if (['7', 'mode', 'download mode'].includes(selected)) {
       const value = await promptForDownloadMode(rl, current.downloadMode, { allowBack: true });
       if (value !== BACK) {
         current.downloadMode = value;
+      }
+    } else if (['8', 'new', 'download only new', 'only new'].includes(selected)) {
+      const value = await promptForDownloadOnlyNew(rl, current.downloadOnlyNew, { allowBack: true });
+      if (value !== BACK) {
+        current.downloadOnlyNew = value;
+      }
+    } else if (['9', 'clear', 'clear history'].includes(selected)) {
+      if (!clearHistoryFn || !current.profileId) {
+        outputStream.write(`${style.warning('No download history available to clear.')}\n`);
+        continue;
+      }
+      const confirmed = await promptForClearHistory(rl, outputStream, current.profileName);
+      if (confirmed) {
+        try {
+          await clearHistoryFn(current.profileId);
+          outputStream.write(`${style.value('Download history cleared for this profile.')}\n`);
+        } catch {
+          outputStream.write(`${style.warning('Could not clear download history. Try deleting download-history.db.')}\n`);
+        }
       }
     } else if (['back', 'b', '0'].includes(selected)) {
       return;
@@ -189,12 +248,19 @@ async function promptForProfileSwitch(rl, outputStream, current, profiles) {
       if (profile !== BACK) {
         return profile;
       }
+    } else if (selected.startsWith('d.') || selected.startsWith('delete')) {
+      const deleteTarget = selected.replace(/^(d\.|delete\s*)/, '').trim();
+      const profile = selectProfile(deleteTarget, profiles, current);
+      if (profile && profile.name !== DEFAULT_PROFILE_NAME) {
+        return { action: 'delete', profile };
+      }
+      outputStream.write(`${style.warning('Choose a valid profile number to delete (cannot delete the default profile).')}\n`);
     } else {
       const profile = selectProfile(action, profiles, current);
       if (profile) {
         return profile;
       }
-      outputStream.write(`${style.warning('Choose a profile number, type create, or press Enter to go back.')}\n`);
+      outputStream.write(`${style.warning('Choose a profile number, type create, d.<number> to delete, or press Enter to go back.')}\n`);
     }
   }
 }
@@ -377,6 +443,42 @@ async function promptForDownloadSource(rl, currentSource, { allowBack = false } 
       return selected;
     }
   }
+}
+
+async function promptForLogLevel(rl, currentLevel, { allowBack = false } = {}) {
+  while (true) {
+    const backHint = allowBack ? ', or back' : '';
+    const answer = await rl.question(`Log level [${currentLevel}] (1=debug, 2=info, 3=warn, 4=error${backHint}): `);
+    if (allowBack && isBackCommand(answer)) {
+      return BACK;
+    }
+    const selected = normalizeLogLevelInput(answer, currentLevel);
+    if (selected) {
+      return selected;
+    }
+  }
+}
+
+function normalizeLogLevelInput(value, currentLevel) {
+  const answer = String(value || '').trim().toLowerCase();
+  if (!answer) {
+    return currentLevel;
+  }
+
+  if (['1', 'debug', 'd'].includes(answer)) {
+    return 'debug';
+  }
+  if (['2', 'info', 'i'].includes(answer)) {
+    return 'info';
+  }
+  if (['3', 'warn', 'w', 'warning'].includes(answer)) {
+    return 'warn';
+  }
+  if (['4', 'error', 'e', 'err'].includes(answer)) {
+    return 'error';
+  }
+
+  return null;
 }
 
 async function promptForDownloadMode(rl, currentMode, { allowBack = false } = {}) {
@@ -578,6 +680,7 @@ export function formatRunConfig({
   downloadSource = DEFAULT_DOWNLOAD_SOURCE,
   albumId = null,
   downloadMode = DEFAULT_DOWNLOAD_MODE,
+  downloadOnlyNew = false,
   profileName = DEFAULT_PROFILE_NAME,
 }, { style = plainStyle } = {}) {
   const source = normalizeDownloadSource(downloadSource);
@@ -591,6 +694,7 @@ export function formatRunConfig({
     formatSettingLine('Download destination', destination || 'not set', style),
     formatSettingLine('Download source', formatDownloadSource(source), style),
     formatSettingLine('Download mode', formatDownloadMode(mode), style),
+    formatSettingLine('Download only new images', downloadOnlyNew ? 'on' : 'off', style),
   ];
 
   if (source === DOWNLOAD_SOURCE_ALBUM || albumId) {
@@ -611,14 +715,21 @@ function formatSettingsEditMenu(current, { allowDestinationChange, style = plain
     style.heading('Settings menu'),
     formatMenuLine(1, 'Immich URL', current.immichUrl || 'not set', style),
     formatMenuLine(2, 'Immich API key', maskApiKey(current.apiKey), style),
+    formatMenuLine(3, 'Log level', current.logLevel || 'warn', style),
     '',
     `  ${style.muted('Now use profile')} ${style.profile(formatProfileLabel(current))}`,
-    formatMenuCommand(3, 'Switch profile', style),
+    formatMenuCommand(4, 'Switch profile', style),
     '',
     style.heading('Profile settings'),
-    formatMenuLine(4, 'Download destination', destinationLabel, style),
-    formatMenuLine(5, 'Download source', formatDownloadSource(current.downloadSource), style),
-    formatMenuLine(6, 'Download mode', formatDownloadMode(current.downloadMode), style),
+    formatMenuLine(5, 'Download destination', destinationLabel, style),
+    formatMenuLine(6, 'Download source', formatDownloadSource(current.downloadSource), style),
+    formatMenuLine(7, 'Download mode', formatDownloadMode(current.downloadMode), style),
+    '',
+    style.heading('Advanced'),
+    formatMenuLine(8, 'Download only new images', current.downloadOnlyNew ? 'on' : 'off', style),
+    `    ${style.muted('Skip assets already downloaded by this profile,')}`,
+    `    ${style.muted('even if files no longer exist. History is always recorded.')}`,
+    formatMenuCommand(9, 'Clear download history for this profile', style),
   ];
 
   if (normalizeDownloadSource(current.downloadSource) === DOWNLOAD_SOURCE_ALBUM || current.albumId) {
@@ -651,6 +762,7 @@ function formatProfileSwitchMenu(current, profiles, { style = plainStyle } = {})
 
   lines.push('');
   lines.push(`  ${style.accent('c.')} ${style.label('Create profile from current settings')}`);
+  lines.push(`  ${style.accent('d.<number>')} ${style.label('Delete a profile')}`);
   lines.push(formatMenuCommand(0, 'Back', style));
   lines.push('');
 
@@ -700,38 +812,46 @@ async function promptForNewProfile(rl, outputStream, current) {
 
     return {
       name,
+      profileId: current.profileId,
       downloadDestination: current.destination,
       downloadSource: current.downloadSource,
       albumId: current.albumId,
       downloadMode: current.downloadMode,
+      downloadOnlyNew: current.downloadOnlyNew,
     };
   }
 }
 
 function applyProfileToCurrent(profile, current, { allowDestinationChange }) {
   current.profileName = profile.name;
+  current.profileId = profile.profileId || current.profileId;
   if (allowDestinationChange) {
     current.destination = profile.downloadDestination ? path.resolve(profile.downloadDestination) : null;
   }
   current.downloadSource = normalizeDownloadSource(profile.downloadSource);
   current.albumId = normalizeAlbumIdInput(profile.albumId);
   current.downloadMode = normalizeDownloadMode(profile.downloadMode);
+  current.downloadOnlyNew = normalizeDownloadOnlyNew(profile.downloadOnlyNew);
 }
 
 function normalizeProfiles(profiles, current) {
   const normalized = profiles.map((profile) => ({
     name: normalizeProfileName(profile.profileName || profile.name),
+    profileId: profile.profileId || null,
     downloadDestination: profile.downloadDestination || profile.destination || null,
     downloadSource: normalizeDownloadSource(profile.downloadSource),
     albumId: normalizeAlbumIdInput(profile.albumId),
     downloadMode: normalizeDownloadMode(profile.downloadMode),
+    downloadOnlyNew: normalizeDownloadOnlyNew(profile.downloadOnlyNew),
   }));
   upsertProfile(normalized, {
     name: current.profileName,
+    profileId: current.profileId,
     downloadDestination: current.destination,
     downloadSource: current.downloadSource,
     albumId: current.albumId,
     downloadMode: current.downloadMode,
+    downloadOnlyNew: current.downloadOnlyNew,
   });
   return normalized.sort(compareProfiles);
 }
@@ -739,10 +859,12 @@ function normalizeProfiles(profiles, current) {
 function upsertProfile(profiles, profile) {
   const next = {
     name: normalizeProfileName(profile.name),
+    profileId: profile.profileId || null,
     downloadDestination: profile.downloadDestination || null,
     downloadSource: normalizeDownloadSource(profile.downloadSource),
     albumId: normalizeAlbumIdInput(profile.albumId),
     downloadMode: normalizeDownloadMode(profile.downloadMode),
+    downloadOnlyNew: normalizeDownloadOnlyNew(profile.downloadOnlyNew),
   };
   const index = profiles.findIndex((candidate) => sameProfile(candidate, next));
   if (index === -1) {
@@ -856,6 +978,37 @@ function normalizeDownloadModeInput(value, currentMode) {
 
 function isBackCommand(value) {
   return ['back', 'b', '0'].includes(String(value || '').trim().toLowerCase());
+}
+
+async function promptForDownloadOnlyNew(rl, currentValue, { allowBack = false } = {}) {
+  while (true) {
+    const currentLabel = currentValue ? 'on' : 'off';
+    const backHint = allowBack ? ', or back' : '';
+    const answer = await rl.question(`Download only new images [${currentLabel}] (1=on, 2=off${backHint}): `);
+    if (allowBack && isBackCommand(answer)) {
+      return BACK;
+    }
+    const trimmed = answer.trim().toLowerCase();
+    if (!trimmed) {
+      return currentValue;
+    }
+    if (['1', 'on', 'yes', 'true', 'y'].includes(trimmed)) {
+      return true;
+    }
+    if (['2', 'off', 'no', 'false', 'n'].includes(trimmed)) {
+      return false;
+    }
+  }
+}
+
+async function promptForDeleteProfile(rl, outputStream, profile) {
+  const answer = await rl.question(`Delete profile "${profile.name}" and its download history? [y/N] `);
+  return ['y', 'yes'].includes(answer.trim().toLowerCase());
+}
+
+async function promptForClearHistory(rl, outputStream, profileName) {
+  const answer = await rl.question(`Clear all download history for profile "${profileName}"? [y/N] `);
+  return ['y', 'yes'].includes(answer.trim().toLowerCase());
 }
 
 function validateImmichUrl(value) {

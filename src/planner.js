@@ -24,6 +24,8 @@ import {
 import { buildConflictFilename, pathExists, prepareDownloadPath } from './fileUtils.js';
 import { createProgressStream, formatBytes } from './progress.js';
 import { plainStyle } from './terminalStyle.js';
+import { isAssetDownloaded, recordDownload as recordHistory, saveDownloadHistory } from './downloadHistory.js';
+import * as log from './logger.js';
 
 const TWO_MINUTES_MS = 2 * 60 * 1000;
 const DEFAULT_RETRY_BACKOFF_MS = 500;
@@ -143,10 +145,17 @@ export async function planDownloads({
   downloadSource = DEFAULT_DOWNLOAD_SOURCE,
   albumId = null,
   downloadMode = DEFAULT_DOWNLOAD_MODE,
+  downloadOnlyNew = false,
+  historyDb = null,
+  profileId = null,
 }) {
   const source = normalizeDownloadSource(downloadSource);
   const mode = normalizeDownloadMode(downloadMode);
+  log.info('planner', 'Starting download planning', {
+    source, mode, destination, downloadOnlyNew, hasHistoryDb: !!historyDb, profileId,
+  });
   const sourceImages = await listSourceImages(client, { downloadSource: source, albumId });
+  log.info('planner', 'Source images loaded', { count: sourceImages.length });
   const plan = {
     downloadSource: source,
     downloadMode: mode,
@@ -159,6 +168,7 @@ export async function planDownloads({
     originalDownloads: 0,
     fallbackOriginals: 0,
     skippedExisting: 0,
+    skippedByHistory: 0,
     plannedDownloads: [],
     totalKnownBytes: 0,
     unknownSizeFiles: 0,
@@ -169,6 +179,20 @@ export async function planDownloads({
     try {
       const choices = await chooseDownloadAssets(client, sourceAsset, { downloadMode: mode });
       for (const choice of choices) {
+        if (downloadOnlyNew && historyDb && profileId) {
+          if (isAssetDownloaded(historyDb, profileId, choice.asset.id)) {
+            plan.skippedByHistory += 1;
+            log.info('planner', 'Skipped by history', {
+              assetId: choice.asset.id, filename: getAssetFilename(sourceAsset),
+            });
+            if (verbose) {
+              console.log(
+                `${getAssetFilename(sourceAsset)} -> ${getAssetFilename(choice.asset)} (skipped: in history)`,
+              );
+            }
+            continue;
+          }
+        }
         await addChoiceToPlan({ plan, destination, sourceAsset, choice, verbose });
       }
     } catch (error) {
@@ -269,12 +293,24 @@ export async function executeDownloadPlan({
   downloadIdleTimeoutMs = client?.downloadIdleTimeoutMs ?? DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
   sleep = delay,
   retryBackoffMs = DEFAULT_RETRY_BACKOFF_MS,
+  historyDb = null,
+  profileId = null,
+  dryRun = false,
 } = {}) {
   const summary = planToSummary(plan);
   summary.dryRunPlanned = 0;
+  summary.historyWriteFailures = [];
   const attempts = normalizeMaxAttempts(maxAttempts);
+  log.info('planner', 'Starting download execution', {
+    totalItems: plan.plannedDownloads.length,
+    maxAttempts: attempts,
+    hasHistoryDb: !!historyDb,
+    profileId,
+    dryRun,
+  });
 
   for (const [index, item] of plan.plannedDownloads.entries()) {
+    const assetFilename = getAssetFilename(item.asset);
     try {
       await downloadPlanItem({
         client,
@@ -288,7 +324,49 @@ export async function executeDownloadPlan({
         retryBackoffMs,
       });
       summary.downloaded += 1;
+      log.info('planner', 'File downloaded successfully', {
+        filename: assetFilename, assetId: item.asset.id, index: index + 1, total: plan.plannedDownloads.length,
+      });
+
+      if (historyDb && profileId && !dryRun) {
+        const historyRecord = {
+          profileId,
+          assetId: item.asset.id,
+          sourceAssetId: item.sourceAsset?.id || item.favorite?.id || null,
+          filename: item.target.fileName,
+          downloadMode: plan.downloadMode,
+          fileSize: item.sizeBytes,
+        };
+        log.info('planner', 'Attempting to record history for downloaded file', {
+          assetId: item.asset.id, filename: item.target.fileName,
+          hasHistoryDb: !!historyDb, profileId, dryRun,
+        });
+        try {
+          recordHistory(historyDb, historyRecord);
+          await saveDownloadHistory(historyDb);
+          log.info('planner', 'History recorded and saved after successful download', {
+            assetId: item.asset.id, filename: item.target.fileName,
+          });
+        } catch (error) {
+          log.error('planner', 'History write failed after successful download', {
+            assetId: item.asset.id, filename: assetFilename,
+            error: error.message, stack: error.stack,
+          });
+          summary.historyWriteFailures.push({
+            assetId: item.asset.id,
+            filename: getAssetFilename(item.asset),
+            message: error.message,
+          });
+        }
+      } else {
+        log.debug('planner', 'Skipping history recording', {
+          hasHistoryDb: !!historyDb, profileId, dryRun,
+        });
+      }
     } catch (error) {
+      log.error('planner', 'Download failed', {
+        filename: assetFilename, assetId: item.asset.id, error: error.message,
+      });
       summary.failures.push({
         assetId: item.asset.id,
         filename: getAssetFilename(item.asset),
@@ -297,6 +375,11 @@ export async function executeDownloadPlan({
     }
   }
 
+  log.info('planner', 'Download execution complete', {
+    downloaded: summary.downloaded,
+    failures: summary.failures.length,
+    historyWriteFailures: summary.historyWriteFailures.length,
+  });
   return summary;
 }
 
@@ -329,7 +412,12 @@ async function downloadPlanItem({
         throw error;
       }
 
-      await sleep(retryDelayMs(attempt, retryBackoffMs));
+      const delayMs = retryDelayMs(attempt, retryBackoffMs);
+      log.warn('planner', 'Retrying download', {
+        filename: item.target.fileName, attempt, maxAttempts,
+        delayMs, error: error.message,
+      });
+      await sleep(delayMs);
     }
   }
 
@@ -401,9 +489,11 @@ export function planToSummary(plan) {
     originalDownloads: plan.originalDownloads || 0,
     fallbackOriginals: plan.fallbackOriginals,
     skippedExisting: plan.skippedExisting,
+    skippedByHistory: plan.skippedByHistory || 0,
     dryRunPlanned: plan.plannedDownloads.length,
     downloaded: 0,
     failures: [...plan.failures],
+    historyWriteFailures: [],
   };
 }
 
@@ -420,6 +510,7 @@ export function formatDownloadPlan(plan, { style = plainStyle } = {}) {
     formatPlanLine('Original images', plan.originalDownloads || 0, style),
     formatPlanLine('Fallback originals', plan.fallbackOriginals, style),
     formatPlanLine('Skipped existing', plan.skippedExisting, style),
+    ...(plan.skippedByHistory ? [formatPlanLine('Skipped by history', plan.skippedByHistory, style)] : []),
     formatPlanLine(
       'Preflight failures',
       plan.failures.length,
@@ -447,6 +538,7 @@ export function formatSummary(summary, { dryRun = false, style = plainStyle } = 
     formatPlanLine('Original images', summary.originalDownloads || 0, style),
     formatPlanLine('Fallback originals', summary.fallbackOriginals, style),
     formatPlanLine('Skipped existing', summary.skippedExisting, style),
+    ...(summary.skippedByHistory ? [formatPlanLine('Skipped by history', summary.skippedByHistory, style)] : []),
   ];
 
   if (dryRun) {
@@ -464,6 +556,15 @@ export function formatSummary(summary, { dryRun = false, style = plainStyle } = 
 
   for (const failure of summary.failures) {
     lines.push(`    - ${style.error(failure.filename)} ${style.muted(`(${failure.assetId})`)}: ${failure.message}`);
+  }
+
+  if (summary.historyWriteFailures?.length > 0) {
+    lines.push('');
+    lines.push(style.warning(`History write failures (${summary.historyWriteFailures.length}):`));
+    for (const failure of summary.historyWriteFailures) {
+      lines.push(`    - ${style.warning(failure.filename)}: ${failure.message}`);
+    }
+    lines.push(style.muted('Downloads succeeded but history may be incomplete.'));
   }
 
   return lines.join('\n');

@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import * as log from './logger.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
@@ -43,6 +44,7 @@ export class ImmichClient {
   }
 
   async searchMetadata(body) {
+    log.debug('api', 'searchMetadata', { page: body.page, size: body.size });
     return this.#requestJson('/search/metadata', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -73,6 +75,7 @@ export class ImmichClient {
   }
 
   async listFavoriteImages() {
+    log.info('api', 'Listing favorite images');
     const favorites = [];
     for await (const asset of this.iterateSearch({
       isFavorite: true,
@@ -81,12 +84,16 @@ export class ImmichClient {
       favorites.push(asset);
     }
 
+    log.info('api', 'Favorite images loaded', { count: favorites.length });
     return favorites;
   }
 
   async listAlbums() {
+    log.info('api', 'Listing albums');
     const albums = await this.#requestJson('/albums', { method: 'GET' });
-    return Array.isArray(albums) ? albums : [];
+    const result = Array.isArray(albums) ? albums : [];
+    log.info('api', 'Albums loaded', { count: result.length });
+    return result;
   }
 
   async listAlbumImages(albumId) {
@@ -94,6 +101,7 @@ export class ImmichClient {
       throw new Error('Album download source requires IMMICH_ALBUM_ID.');
     }
 
+    log.info('api', 'Listing album images', { albumId });
     const images = [];
     for await (const asset of this.iterateSearch({
       albumIds: [albumId],
@@ -102,10 +110,12 @@ export class ImmichClient {
       images.push(asset);
     }
 
+    log.info('api', 'Album images loaded', { albumId, count: images.length });
     return images;
   }
 
   async searchRawCandidates({ takenAfter, takenBefore }) {
+    log.debug('api', 'Searching RAW candidates', { takenAfter, takenBefore });
     const body = {
       type: 'IMAGE',
       takenAfter,
@@ -117,10 +127,12 @@ export class ImmichClient {
       candidates.push(asset);
     }
 
+    log.debug('api', 'RAW candidates found', { count: candidates.length });
     return candidates;
   }
 
   async downloadAsset(assetId) {
+    log.info('api', 'Downloading asset', { assetId });
     const response = await this.#request(`/assets/${encodeURIComponent(assetId)}/original`, {
       method: 'GET',
     });
@@ -130,6 +142,7 @@ export class ImmichClient {
     }
 
     const totalBytes = parseContentLength(response.headers.get('content-length'));
+    log.debug('api', 'Download stream started', { assetId, totalBytes });
 
     return {
       stream: Readable.fromWeb(response.body),
@@ -168,8 +181,10 @@ export class ImmichClient {
       });
     } catch (error) {
       if (signal.aborted) {
+        log.warn('api', 'Request timed out', { url: url.pathname, timeoutMs: this.requestTimeoutMs });
         throw signal.reason;
       }
+      log.error('api', 'Request failed', { url: url.pathname, error: error.message });
       throw error;
     } finally {
       clear();
@@ -177,6 +192,7 @@ export class ImmichClient {
 
     if (!response.ok) {
       const message = await readErrorResponse(response);
+      log.error('api', 'API error response', { status: response.status, statusText: response.statusText, url: url.pathname });
       throw new ImmichApiError(
         `Immich API ${response.status} ${response.statusText}: ${message}`,
         {

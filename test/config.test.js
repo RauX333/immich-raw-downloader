@@ -16,16 +16,19 @@ const defaultAdvancedConfig = {
   downloadMaxAttempts: DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
   requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
   downloadIdleTimeoutMs: DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
+  logLevel: 'warn',
 };
 
 const defaultProfileConfig = {
   profileName: 'default',
   profiles: [{
     name: 'default',
+    profileId: null,
     downloadDestination: null,
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    downloadOnlyNew: false,
   }],
 };
 
@@ -41,6 +44,7 @@ test('reads optional download destination from environment', () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    downloadOnlyNew: false,
     ...defaultProfileConfig,
     profiles: [{
       ...defaultProfileConfig.profiles[0],
@@ -61,6 +65,7 @@ test('download destination is optional when env is missing', () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    downloadOnlyNew: false,
     ...defaultProfileConfig,
     ...defaultAdvancedConfig,
   });
@@ -74,6 +79,7 @@ test('connection settings can be missing before first-run prompts', () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    downloadOnlyNew: false,
     ...defaultProfileConfig,
     ...defaultAdvancedConfig,
   });
@@ -93,6 +99,7 @@ test('reads album download source and original download mode from environment', 
     downloadSource: 'album',
     albumId: 'album-id',
     downloadMode: 'original',
+    downloadOnlyNew: false,
     ...defaultProfileConfig,
     profiles: [{
       ...defaultProfileConfig.profiles[0],
@@ -124,17 +131,21 @@ test('reads the last used named profile from environment', () => {
   assert.deepEqual(config.profiles, [
     {
       name: 'default',
+      profileId: null,
       downloadDestination: '/default',
       downloadSource: 'favorites',
       albumId: null,
       downloadMode: 'raw',
+      downloadOnlyNew: false,
     },
     {
       name: 'trip',
+      profileId: null,
       downloadDestination: '/trip',
       downloadSource: 'album',
       albumId: 'album-trip',
       downloadMode: 'both',
+      downloadOnlyNew: false,
     },
   ]);
 });
@@ -186,6 +197,15 @@ test('uses defaults for invalid advanced retry and timeout settings', () => {
   assert.equal(config.downloadIdleTimeoutMs, DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS);
 });
 
+test('reads log level from environment', () => {
+  assert.equal(readConfigFromEnv({ IMMICH_LOG_LEVEL: 'debug' }).logLevel, 'debug');
+  assert.equal(readConfigFromEnv({ IMMICH_LOG_LEVEL: 'info' }).logLevel, 'info');
+  assert.equal(readConfigFromEnv({ IMMICH_LOG_LEVEL: 'warn' }).logLevel, 'warn');
+  assert.equal(readConfigFromEnv({ IMMICH_LOG_LEVEL: 'error' }).logLevel, 'error');
+  assert.equal(readConfigFromEnv({ IMMICH_LOG_LEVEL: 'invalid' }).logLevel, 'warn');
+  assert.equal(readConfigFromEnv({}).logLevel, 'warn');
+});
+
 test('saveConfigToEnv persists settings while preserving unrelated lines', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'immich-env-save-'));
   const envPath = path.join(root, '.env');
@@ -198,6 +218,9 @@ test('saveConfigToEnv persists settings while preserving unrelated lines', async
     downloadSource: 'album',
     albumId: 'album-id',
     downloadMode: 'both',
+    downloadOnlyNew: false,
+    profileId: '',
+    logLevel: 'debug',
   }, envPath);
 
   const content = await fs.readFile(envPath, 'utf8');
@@ -209,6 +232,8 @@ test('saveConfigToEnv persists settings while preserving unrelated lines', async
   assert.match(content, /^IMMICH_DOWNLOAD_SOURCE=album/m);
   assert.match(content, /^IMMICH_ALBUM_ID=album-id/m);
   assert.match(content, /^IMMICH_DOWNLOAD_MODE=both/m);
+  assert.match(content, /^IMMICH_DOWNLOAD_ONLY_NEW=false/m);
+  assert.match(content, /^IMMICH_LOG_LEVEL=debug/m);
 });
 
 test('saveConfigToEnv creates .env when it does not exist', async () => {
@@ -222,6 +247,8 @@ test('saveConfigToEnv creates .env when it does not exist', async () => {
     downloadSource: 'favorites',
     albumId: null,
     downloadMode: 'raw',
+    downloadOnlyNew: false,
+    profileId: '',
   }, envPath);
 
   const content = await fs.readFile(envPath, 'utf8');
@@ -232,6 +259,7 @@ test('saveConfigToEnv creates .env when it does not exist', async () => {
   assert.match(content, /^IMMICH_DOWNLOAD_SOURCE=favorites/m);
   assert.match(content, /^IMMICH_ALBUM_ID=$/m);
   assert.match(content, /^IMMICH_DOWNLOAD_MODE=raw/m);
+  assert.match(content, /^IMMICH_DOWNLOAD_ONLY_NEW=false/m);
 });
 
 test('saveConfigToEnv persists named profile settings and last profile', async () => {
@@ -245,6 +273,8 @@ test('saveConfigToEnv persists named profile settings and last profile', async (
     downloadSource: 'album',
     albumId: 'album-id',
     downloadMode: 'both',
+    downloadOnlyNew: false,
+    profileId: '',
     profileName: 'Trip 2026',
   }, envPath);
 
@@ -254,6 +284,7 @@ test('saveConfigToEnv persists named profile settings and last profile', async (
   assert.match(content, /^IMMICH_PROFILE_TRIP_2026_DOWNLOAD_SOURCE=album/m);
   assert.match(content, /^IMMICH_PROFILE_TRIP_2026_ALBUM_ID=album-id/m);
   assert.match(content, /^IMMICH_PROFILE_TRIP_2026_DOWNLOAD_MODE=both/m);
+  assert.match(content, /^IMMICH_PROFILE_TRIP_2026_DOWNLOAD_ONLY_NEW=false/m);
 });
 
 test('command-line destination still parses as an override', () => {

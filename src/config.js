@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 export const DOWNLOAD_SOURCE_FAVORITES = 'favorites';
 export const DOWNLOAD_SOURCE_ALBUM = 'album';
@@ -13,6 +14,16 @@ export const DEFAULT_DOWNLOAD_MAX_ATTEMPTS = 3;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 120_000;
 export const DEFAULT_PROFILE_NAME = 'default';
+export const DEFAULT_LOG_LEVEL = 'warn';
+
+export function generateProfileId() {
+  return crypto.randomUUID();
+}
+
+export function normalizeDownloadOnlyNew(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(normalized);
+}
 
 export function loadDotenv(filePath = path.resolve(process.cwd(), '.env')) {
   if (!fs.existsSync(filePath)) {
@@ -98,6 +109,7 @@ export function readConfigFromEnv(env = process.env) {
   const downloadSource = normalizeDownloadSource(activeProfile?.downloadSource);
   const albumId = activeProfile?.albumId || null;
   const downloadMode = normalizeDownloadMode(activeProfile?.downloadMode);
+  const downloadOnlyNew = normalizeDownloadOnlyNew(activeProfile?.downloadOnlyNew);
   const downloadMaxAttempts = parsePositiveInteger(
     env.IMMICH_DOWNLOAD_MAX_ATTEMPTS,
     DEFAULT_DOWNLOAD_MAX_ATTEMPTS,
@@ -110,6 +122,7 @@ export function readConfigFromEnv(env = process.env) {
     env.IMMICH_DOWNLOAD_IDLE_TIMEOUT_SECONDS,
     DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
   );
+  const logLevel = normalizeLogLevel(env.IMMICH_LOG_LEVEL);
 
   return {
     immichUrl,
@@ -118,11 +131,13 @@ export function readConfigFromEnv(env = process.env) {
     downloadSource,
     albumId,
     downloadMode,
+    downloadOnlyNew,
     profileName: activeProfile?.name || DEFAULT_PROFILE_NAME,
     profiles,
     downloadMaxAttempts,
     requestTimeoutMs,
     downloadIdleTimeoutMs,
+    logLevel,
   };
 }
 
@@ -130,14 +145,16 @@ function readProfilesFromEnv(env) {
   const profiles = new Map();
   const defaultProfile = {
     name: DEFAULT_PROFILE_NAME,
+    profileId: env.PROFILE_ID || env.IMMICH_PROFILE_ID || null,
     downloadDestination: env.DOWNLOAD_DESTINATION || null,
     downloadSource: normalizeDownloadSource(env.IMMICH_DOWNLOAD_SOURCE),
     albumId: env.IMMICH_ALBUM_ID || null,
     downloadMode: normalizeDownloadMode(env.IMMICH_DOWNLOAD_MODE),
+    downloadOnlyNew: normalizeDownloadOnlyNew(env.IMMICH_DOWNLOAD_ONLY_NEW),
   };
   profiles.set(profileKey(defaultProfile.name), defaultProfile);
 
-  const profilePattern = /^IMMICH_PROFILE_([A-Z0-9_]+)_(DOWNLOAD_DESTINATION|DOWNLOAD_SOURCE|ALBUM_ID|DOWNLOAD_MODE)$/;
+  const profilePattern = /^IMMICH_PROFILE_([A-Z0-9_]+)_(PROFILE_ID|DOWNLOAD_DESTINATION|DOWNLOAD_SOURCE|ALBUM_ID|DOWNLOAD_MODE|DOWNLOAD_ONLY_NEW)$/;
   for (const [key, value] of Object.entries(env)) {
     const match = key.match(profilePattern);
     if (!match) {
@@ -149,13 +166,17 @@ function readProfilesFromEnv(env) {
     const mapKey = profileKey(name);
     const profile = profiles.get(mapKey) || {
       name,
+      profileId: null,
       downloadDestination: null,
       downloadSource: DEFAULT_DOWNLOAD_SOURCE,
       albumId: null,
       downloadMode: DEFAULT_DOWNLOAD_MODE,
+      downloadOnlyNew: false,
     };
 
-    if (field === 'DOWNLOAD_DESTINATION') {
+    if (field === 'PROFILE_ID') {
+      profile.profileId = value || null;
+    } else if (field === 'DOWNLOAD_DESTINATION') {
       profile.downloadDestination = value || null;
     } else if (field === 'DOWNLOAD_SOURCE') {
       profile.downloadSource = normalizeDownloadSource(value);
@@ -163,6 +184,8 @@ function readProfilesFromEnv(env) {
       profile.albumId = value || null;
     } else if (field === 'DOWNLOAD_MODE') {
       profile.downloadMode = normalizeDownloadMode(value);
+    } else if (field === 'DOWNLOAD_ONLY_NEW') {
+      profile.downloadOnlyNew = normalizeDownloadOnlyNew(value);
     }
 
     profiles.set(mapKey, profile);
@@ -174,7 +197,7 @@ function readProfilesFromEnv(env) {
 }
 
 function readLegacyScopedProfilesFromEnv(env, profiles) {
-  const legacyPattern = /^IMMICH_(DEFAULT|GLOBAL|PROJECT)_PROFILE_([A-Z0-9_]+)_(DOWNLOAD_DESTINATION|DOWNLOAD_SOURCE|ALBUM_ID|DOWNLOAD_MODE)$/;
+  const legacyPattern = /^IMMICH_(DEFAULT|GLOBAL|PROJECT)_PROFILE_([A-Z0-9_]+)_(PROFILE_ID|DOWNLOAD_DESTINATION|DOWNLOAD_SOURCE|ALBUM_ID|DOWNLOAD_MODE|DOWNLOAD_ONLY_NEW)$/;
   for (const [key, value] of Object.entries(env)) {
     const match = key.match(legacyPattern);
     if (!match) {
@@ -186,13 +209,17 @@ function readLegacyScopedProfilesFromEnv(env, profiles) {
     const mapKey = profileKey(name);
     const profile = profiles.get(mapKey) || {
       name,
+      profileId: null,
       downloadDestination: null,
       downloadSource: DEFAULT_DOWNLOAD_SOURCE,
       albumId: null,
       downloadMode: DEFAULT_DOWNLOAD_MODE,
+      downloadOnlyNew: false,
     };
 
-    if (field === 'DOWNLOAD_DESTINATION') {
+    if (field === 'PROFILE_ID') {
+      profile.profileId = value || null;
+    } else if (field === 'DOWNLOAD_DESTINATION') {
       profile.downloadDestination = value || null;
     } else if (field === 'DOWNLOAD_SOURCE') {
       profile.downloadSource = normalizeDownloadSource(value);
@@ -200,6 +227,8 @@ function readLegacyScopedProfilesFromEnv(env, profiles) {
       profile.albumId = value || null;
     } else if (field === 'DOWNLOAD_MODE') {
       profile.downloadMode = normalizeDownloadMode(value);
+    } else if (field === 'DOWNLOAD_ONLY_NEW') {
+      profile.downloadOnlyNew = normalizeDownloadOnlyNew(value);
     }
 
     profiles.set(mapKey, profile);
@@ -247,6 +276,14 @@ export function normalizeDownloadMode(value) {
   return DOWNLOAD_MODE_RAW;
 }
 
+export function normalizeLogLevel(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['debug', 'info', 'warn', 'error'].includes(normalized)) {
+    return normalized;
+  }
+  return DEFAULT_LOG_LEVEL;
+}
+
 export function normalizeProfileName(value) {
   const normalized = String(value || '')
     .trim()
@@ -262,7 +299,11 @@ export async function saveConfigToEnv(config, filePath = path.resolve(process.cw
     IMMICH_URL: config.immichUrl,
     IMMICH_API_KEY: config.apiKey,
     IMMICH_PROFILE_NAME: profileName,
-    ...profileUpdatesForConfig(config, profileName),
+    IMMICH_LOG_LEVEL: config.logLevel != null ? normalizeLogLevel(config.logLevel) : undefined,
+    ...profileUpdatesForConfig({
+      ...config,
+      profileId: config.profileId,
+    }, profileName),
   };
 
   const existing = await readEnvFileLines(filePath);
@@ -294,10 +335,12 @@ export async function saveConfigToEnv(config, filePath = path.resolve(process.cw
 
 function profileUpdatesForConfig(config, name) {
   const profileValues = {
+    PROFILE_ID: config.profileId || '',
     DOWNLOAD_DESTINATION: config.downloadDestination,
     IMMICH_DOWNLOAD_SOURCE: normalizeDownloadSource(config.downloadSource),
     IMMICH_ALBUM_ID: config.albumId,
     IMMICH_DOWNLOAD_MODE: normalizeDownloadMode(config.downloadMode),
+    IMMICH_DOWNLOAD_ONLY_NEW: normalizeDownloadOnlyNew(config.downloadOnlyNew) ? 'true' : 'false',
   };
 
   if (name === DEFAULT_PROFILE_NAME) {
@@ -306,10 +349,12 @@ function profileUpdatesForConfig(config, name) {
 
   const prefix = profileEnvPrefix(name);
   return {
+    [`${prefix}_PROFILE_ID`]: profileValues.PROFILE_ID,
     [`${prefix}_DOWNLOAD_DESTINATION`]: profileValues.DOWNLOAD_DESTINATION,
     [`${prefix}_DOWNLOAD_SOURCE`]: profileValues.IMMICH_DOWNLOAD_SOURCE,
     [`${prefix}_ALBUM_ID`]: profileValues.IMMICH_ALBUM_ID,
     [`${prefix}_DOWNLOAD_MODE`]: profileValues.IMMICH_DOWNLOAD_MODE,
+    [`${prefix}_DOWNLOAD_ONLY_NEW`]: profileValues.IMMICH_DOWNLOAD_ONLY_NEW,
   };
 }
 
@@ -382,6 +427,7 @@ Usage:
 Environment:
   IMMICH_URL       Immich server URL, e.g. http://immich.example.local:2283
   IMMICH_API_KEY   Immich API key with asset.read, asset.download, and album.read permissions
+  IMMICH_LOG_LEVEL Optional console log level: debug, info, warn (default), or error
   DOWNLOAD_DESTINATION
                    Optional default destination folder
   IMMICH_DOWNLOAD_SOURCE

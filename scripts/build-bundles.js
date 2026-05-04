@@ -9,6 +9,7 @@ const distRoot = path.join(projectRoot, 'dist');
 const commonEntries = [
   'bin',
   'src',
+  'node_modules',
   'package.json',
   'README.md',
   '.env.example',
