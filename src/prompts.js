@@ -10,6 +10,7 @@ import {
   DOWNLOAD_MODE_RAW,
   DOWNLOAD_SOURCE_ALBUM,
   DOWNLOAD_SOURCE_FAVORITES,
+  normalizeAlbumIdInput,
   normalizeDownloadMode,
   normalizeDownloadOnlyNew,
   normalizeDownloadSource,
@@ -17,6 +18,18 @@ import {
   normalizeProfileName,
 } from './config.js';
 import { ensureExistingDirectory } from './fileUtils.js';
+import {
+  applyProfileToCurrent,
+  compareProfiles,
+  formatProfileLabel,
+  formatProfileSummary,
+  normalizeProfiles,
+  promptForDeleteProfile,
+  promptForProfileSwitch,
+  sameProfile,
+  selectProfile,
+  upsertProfile,
+} from './profiles.js';
 import { plainStyle, styleForStream } from './terminalStyle.js';
 
 const BACK = Symbol('back');
@@ -228,39 +241,6 @@ async function editRunConfigMenu({
       return;
     } else {
       outputStream.write(`${style.warning('Choose a listed setting number, or press Enter when done.')}\n`);
-    }
-  }
-}
-
-async function promptForProfileSwitch(rl, outputStream, current, profiles) {
-  while (true) {
-    const style = styleForStream(outputStream);
-    outputStream.write(formatProfileSwitchMenu(current, profiles, { style }));
-    const action = await rl.question('Choose a profile, create a profile, or press Enter to go back: ');
-    const selected = action.trim().toLowerCase();
-
-    if (!selected || ['back', 'b', '0'].includes(selected)) {
-      return BACK;
-    }
-
-    if (['c', 'create', 'new'].includes(selected)) {
-      const profile = await promptForNewProfile(rl, outputStream, current);
-      if (profile !== BACK) {
-        return profile;
-      }
-    } else if (selected.startsWith('d.') || selected.startsWith('delete')) {
-      const deleteTarget = selected.replace(/^(d\.|delete\s*)/, '').trim();
-      const profile = selectProfile(deleteTarget, profiles, current);
-      if (profile && profile.name !== DEFAULT_PROFILE_NAME) {
-        return { action: 'delete', profile };
-      }
-      outputStream.write(`${style.warning('Choose a valid profile number to delete (cannot delete the default profile).')}\n`);
-    } else {
-      const profile = selectProfile(action, profiles, current);
-      if (profile) {
-        return profile;
-      }
-      outputStream.write(`${style.warning('Choose a profile number, type create, d.<number> to delete, or press Enter to go back.')}\n`);
     }
   }
 }
@@ -744,31 +724,6 @@ function formatSettingsEditMenu(current, { allowDestinationChange, style = plain
   return lines.join('\n');
 }
 
-function formatProfileSwitchMenu(current, profiles, { style = plainStyle } = {}) {
-  const lines = [
-    '',
-    style.heading('Switch profile'),
-    `  ${style.muted('Now use profile')} ${style.profile(formatProfileLabel(current))}`,
-    style.heading('Available profiles'),
-  ];
-
-  profiles.forEach((profile, index) => {
-    const marker = sameProfile(profile, current) ? '*' : ' ';
-    const label = marker === '*'
-      ? style.profile(formatProfileLabel(profile))
-      : style.value(formatProfileLabel(profile));
-    lines.push(`  ${style.accent(`${index + 1}.`)} ${marker} ${label} ${style.muted('-')} ${formatProfileSummary(profile, style)}`);
-  });
-
-  lines.push('');
-  lines.push(`  ${style.accent('c.')} ${style.label('Create profile from current settings')}`);
-  lines.push(`  ${style.accent('d.<number>')} ${style.label('Delete a profile')}`);
-  lines.push(formatMenuCommand(0, 'Back', style));
-  lines.push('');
-
-  return lines.join('\n');
-}
-
 function formatSettingLine(label, value, style, { indent = '  ', profile = false } = {}) {
   const formattedValue = profile ? style.profile(value) : style.value(value);
   return `${indent}${style.label(`${label}:`)} ${formattedValue}`;
@@ -780,127 +735,6 @@ function formatMenuLine(number, label, value, style) {
 
 function formatMenuCommand(number, label, style) {
   return `  ${style.accent(`${number}.`)} ${style.label(label)}`;
-}
-
-function selectProfile(value, profiles, current) {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) {
-    return profiles.find((profile) => sameProfile(profile, current)) || null;
-  }
-
-  const number = Number(trimmed);
-  if (Number.isInteger(number) && number >= 1 && number <= profiles.length) {
-    return profiles[number - 1];
-  }
-
-  const name = normalizeProfileName(trimmed.includes('/') ? trimmed.split('/').pop() : trimmed);
-  return profiles.find((profile) => profile.name === name) || null;
-}
-
-async function promptForNewProfile(rl, outputStream, current) {
-  while (true) {
-    const answer = await rl.question('New profile name (type back to return): ');
-    if (isBackCommand(answer)) {
-      return BACK;
-    }
-
-    const name = normalizeProfileName(answer);
-    if (name === DEFAULT_PROFILE_NAME && answer.trim().toLowerCase() !== DEFAULT_PROFILE_NAME) {
-      outputStream.write('Please enter a profile name using letters, numbers, spaces, dashes, or underscores.\n');
-      continue;
-    }
-
-    return {
-      name,
-      profileId: current.profileId,
-      downloadDestination: current.destination,
-      downloadSource: current.downloadSource,
-      albumId: current.albumId,
-      downloadMode: current.downloadMode,
-      downloadOnlyNew: current.downloadOnlyNew,
-    };
-  }
-}
-
-function applyProfileToCurrent(profile, current, { allowDestinationChange }) {
-  current.profileName = profile.name;
-  current.profileId = profile.profileId || current.profileId;
-  if (allowDestinationChange) {
-    current.destination = profile.downloadDestination ? path.resolve(profile.downloadDestination) : null;
-  }
-  current.downloadSource = normalizeDownloadSource(profile.downloadSource);
-  current.albumId = normalizeAlbumIdInput(profile.albumId);
-  current.downloadMode = normalizeDownloadMode(profile.downloadMode);
-  current.downloadOnlyNew = normalizeDownloadOnlyNew(profile.downloadOnlyNew);
-}
-
-function normalizeProfiles(profiles, current) {
-  const normalized = profiles.map((profile) => ({
-    name: normalizeProfileName(profile.profileName || profile.name),
-    profileId: profile.profileId || null,
-    downloadDestination: profile.downloadDestination || profile.destination || null,
-    downloadSource: normalizeDownloadSource(profile.downloadSource),
-    albumId: normalizeAlbumIdInput(profile.albumId),
-    downloadMode: normalizeDownloadMode(profile.downloadMode),
-    downloadOnlyNew: normalizeDownloadOnlyNew(profile.downloadOnlyNew),
-  }));
-  upsertProfile(normalized, {
-    name: current.profileName,
-    profileId: current.profileId,
-    downloadDestination: current.destination,
-    downloadSource: current.downloadSource,
-    albumId: current.albumId,
-    downloadMode: current.downloadMode,
-    downloadOnlyNew: current.downloadOnlyNew,
-  });
-  return normalized.sort(compareProfiles);
-}
-
-function upsertProfile(profiles, profile) {
-  const next = {
-    name: normalizeProfileName(profile.name),
-    profileId: profile.profileId || null,
-    downloadDestination: profile.downloadDestination || null,
-    downloadSource: normalizeDownloadSource(profile.downloadSource),
-    albumId: normalizeAlbumIdInput(profile.albumId),
-    downloadMode: normalizeDownloadMode(profile.downloadMode),
-    downloadOnlyNew: normalizeDownloadOnlyNew(profile.downloadOnlyNew),
-  };
-  const index = profiles.findIndex((candidate) => sameProfile(candidate, next));
-  if (index === -1) {
-    profiles.push(next);
-  } else {
-    profiles[index] = next;
-  }
-  profiles.sort(compareProfiles);
-}
-
-function compareProfiles(left, right) {
-  if (left.name === DEFAULT_PROFILE_NAME) {
-    return -1;
-  }
-  if (right.name === DEFAULT_PROFILE_NAME) {
-    return 1;
-  }
-  return left.name.localeCompare(right.name);
-}
-
-function sameProfile(profile, current) {
-  return profile.name === normalizeProfileName(current.profileName || current.name);
-}
-
-function formatProfileLabel(profile) {
-  const name = normalizeProfileName(profile.profileName || profile.name);
-  return name;
-}
-
-function formatProfileSummary(profile, style = plainStyle) {
-  const destination = profile.downloadDestination || profile.destination || 'not set';
-  return [
-    style.value(destination),
-    style.accent(formatDownloadSource(profile.downloadSource)),
-    style.accent(formatDownloadMode(profile.downloadMode)),
-  ].join(style.muted(', '));
 }
 
 export function formatDownloadSource(source) {
@@ -917,26 +751,6 @@ export function formatDownloadMode(mode) {
   }
 
   return 'raw';
-}
-
-export function normalizeAlbumIdInput(value) {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    const url = new URL(trimmed);
-    const segments = url.pathname.split('/').filter(Boolean);
-    const albumIndex = segments.findIndex((segment) => segment.toLowerCase() === 'albums');
-    if (albumIndex !== -1 && segments[albumIndex + 1]) {
-      return segments[albumIndex + 1];
-    }
-  } catch {
-    // Plain album IDs land here.
-  }
-
-  return trimmed;
 }
 
 function normalizeDownloadSourceInput(value, currentSource) {
@@ -999,11 +813,6 @@ async function promptForDownloadOnlyNew(rl, currentValue, { allowBack = false } 
       return false;
     }
   }
-}
-
-async function promptForDeleteProfile(rl, outputStream, profile) {
-  const answer = await rl.question(`Delete profile "${profile.name}" and its download history? [y/N] `);
-  return ['y', 'yes'].includes(answer.trim().toLowerCase());
 }
 
 async function promptForClearHistory(rl, outputStream, profileName) {

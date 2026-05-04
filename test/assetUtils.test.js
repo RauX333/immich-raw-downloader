@@ -5,10 +5,9 @@ import {
   getDateFolderName,
   getStem,
   formatLocalDateFolder,
-  isRawFilename,
   normalizeStem,
-  pickBestRawMatch,
 } from '../src/assetUtils.js';
+import { isRawFilename, pickBestRawMatch } from '../src/rawMatching.js';
 
 test('detects common RAW extensions case-insensitively', () => {
   assert.equal(isRawFilename('DSC001.ARW'), true);

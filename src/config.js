@@ -418,6 +418,26 @@ function parsePositiveInteger(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+export function normalizeAlbumIdInput(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const segments = url.pathname.split('/').filter(Boolean);
+    const albumIndex = segments.findIndex((segment) => segment.toLowerCase() === 'albums');
+    if (albumIndex !== -1 && segments[albumIndex + 1]) {
+      return segments[albumIndex + 1];
+    }
+  } catch {
+    // Plain album IDs land here.
+  }
+
+  return trimmed;
+}
+
 export function helpText() {
   return `Immich Favorite RAW Downloader
 
