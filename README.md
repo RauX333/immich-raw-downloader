@@ -4,10 +4,10 @@ Search and download matching RAW version of images from Immich for favorite phot
 
 ## What it does
 
-- Search and downloads RAW version of images for Immich favorites
-- Search and downloads RAW version of images for a selected Immich album
+- Searches and downloads RAW versions of images for Immich favorites
+- Searches and downloads RAW versions of images for a selected Immich album
 - Can download RAW files, original files, or both
-- Can download only new images (skips previously downloaded)
+- Can download only new images (skips previously downloaded ones)
 - Skips files that already exist on disk
 - Supports dry run before downloading
 - Supports named profiles for different download configurations
@@ -69,8 +69,8 @@ Extract the downloaded file.
 Open the extracted folder and run the launcher:
 
 ```text
-macOS:   Run Immich RAW Downloader.command
-Windows: Run Immich RAW Downloader.cmd
+macOS:   Immich RAW Downloader.command
+Windows: Immich RAW Downloader.cmd
 Linux:   run-immich-raw-downloader.sh
 ```
 
@@ -98,7 +98,7 @@ Download destination: /Users/you/Pictures/RAW
 
 
 ## Configuration
-Edit settings in cli interface.
+Edit settings through the interactive CLI menu.
 
 Or edit `.env` yourself:
 
@@ -135,7 +135,7 @@ Downloads both the selected image and the matching RAW file when available.
 
 ## Download only new images
 
-When enabled, the tool skips images that were already downloaded before. It tracks downloads in a local SQLite database (`download-history.db`). This is useful when you run the tool regularly and only want to pull newly favorited photos or newly added album photos, even if you edited or moved the local alreay downloaded files.
+When enabled, the tool skips images that were already downloaded before. It tracks downloads in a local SQLite database (`download-history.db`). This is useful when you run the tool regularly and only want to pull newly favorited photos or newly added album photos, even if you edited or moved the local already downloaded files.
 
 
 
@@ -198,7 +198,7 @@ Then run the script for your platform:
 - `dist/immich-raw-downloader-linux/run-immich-raw-downloader.sh`
 - `dist/immich-raw-downloader-windows/Run Immich RAW Downloader.cmd`
 
-Each folder contains the app, a launcher, `README-FIRST.txt`, and a copy of `.env` if one exists.
+Each folder contains the app, a launcher, and a copy of `.env` if one exists.
 
 ## Development
 

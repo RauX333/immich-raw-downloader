@@ -62,7 +62,6 @@ for (const platform of platforms) {
     await fs.chmod(path.join(bundleRoot, launcherName), 0o755);
   }
 
-  await fs.writeFile(path.join(bundleRoot, 'README-FIRST.txt'), readmeFirst(platform), 'utf8');
 }
 
 console.log(`Bundles written to ${distRoot}`);
@@ -86,25 +85,6 @@ async function exists(filePath) {
     }
     throw error;
   }
-}
-
-function readmeFirst(platform) {
-  const launcher = platform.launcherName;
-  return `Immich Favorite RAW Downloader
-
-This folder is a portable bundle for ${platform.name}.
-
-How to run:
-1. Install Node.js 22 or newer if this computer does not have it.
-2. Double-click:
-   ${launcher}
-
-The launcher opens or uses a terminal window. If .env is missing or incomplete, enter IMMICH_URL, IMMICH_API_KEY, and the download destination when prompted. In the settings menu, connection settings appear first, then the active profile, switch profile, and profile settings for destination/source/mode. The switch profile screen lists available profiles and lets you create a profile from the current destination, source, and mode. Type back inside a setting prompt to return to the settings menu.
-
-After settings are entered, the launcher saves them to .env, remembers the last used profile, shows the download plan, asks for confirmation, and then downloads files. Files are saved into local-date folders, temporary .part files are cleaned up after failed transfers, and transient download failures are retried automatically.
-
-If double-click is blocked by your file manager, open a terminal in this folder and run the launcher from there.
-`;
 }
 
 function macosLauncher() {
